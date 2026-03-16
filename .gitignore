@@ -1,0 +1,26 @@
+# secrets
+.env
+
+# raw data — too large for git
+data/raw/
+data/processed/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+
+# notebooks checkpoints
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# models — too large for git (save to Snowflake stage instead)
+models/
+*.pkl
+*.joblib
+config.js

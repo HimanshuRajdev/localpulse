@@ -1,0 +1,132 @@
+# =============================================================================
+# config.yaml
+# LocalPulse — Non-secret configuration
+#
+# Secret credentials (Snowflake password, API keys) go in .env
+# This file is safe to commit to GitHub
+# =============================================================================
+
+
+# ── search settings ───────────────────────────────────────────────────────────
+search:
+  default_radius_km: 1.5      # default scan radius when user doesn't specify
+  max_radius_km: 3.0          # hard cap — beyond this Overpass can timeout
+  min_radius_km: 0.5          # minimum meaningful scan area
+
+
+# ── overpass API ──────────────────────────────────────────────────────────────
+overpass:
+  endpoint: "https://overpass-api.de/api/interpreter"
+  nominatim_endpoint: "https://nominatim.openstreetmap.org/search"
+  timeout_seconds: 60
+  retry_attempts: 3
+  retry_backoff_seconds: 5    # doubles each retry: 5s, 10s, 20s
+  sleep_between_requests: 1.0 # be a good citizen — don't hammer the server
+
+
+# ── grid tiler (kept for large radius scans > 3km) ───────────────────────────
+tiler:
+  target_per_tile: 50         # stay below Overpass soft limit per tile
+  min_tile_radius_km: 0.2
+  max_tile_radius_km: 2.0
+  overlap_factor: 1.5         # tile spacing = radius × overlap_factor
+
+
+# ── snowflake ─────────────────────────────────────────────────────────────────
+snowflake:
+  database: LOCALPULSE
+  warehouse: COMPUTE_WH
+  schemas:
+    raw:      RAW
+    staging:  STAGING
+    features: FEATURES
+    results:  RESULTS
+  tables:
+    yelp_businesses:     RAW.YELP_BUSINESSES
+    yelp_reviews:        RAW.YELP_REVIEWS
+    osm_businesses:      RAW.OSM_BUSINESSES
+    businesses:          STAGING.BUSINESSES
+    reviews:             STAGING.REVIEWS
+    tile_density:        STAGING.TILE_DENSITY
+    category_map:        STAGING.CATEGORY_MAP
+    category_medians:    STAGING.CATEGORY_MEDIANS
+    review_sentiment:    FEATURES.REVIEW_SENTIMENT
+    complaints:          FEATURES.COMPLAINTS
+    nlp_signals:         FEATURES.NLP_SIGNALS
+    cluster_assignments: RESULTS.CLUSTER_ASSIGNMENTS
+    gap_scores:          RESULTS.GAP_SCORES
+
+
+# ── yelp dataset ──────────────────────────────────────────────────────────────
+yelp:
+  raw_business_file:      "data/raw/yelp_academic_dataset_business.json"
+  raw_review_file:        "data/raw/yelp_academic_dataset_review.json"
+  filtered_business_file: "data/processed/yelp_businesses_filtered.jsonl"
+  filtered_review_file:   "data/processed/yelp_reviews_filtered.jsonl"
+  min_review_length: 40         # shorter reviews are useless for NLP
+  max_reviews_per_biz: 20       # cap per business to avoid class imbalance
+  upload_chunk_size: 10000      # rows per Snowflake batch upload
+
+
+# ── phase 3: cortex NLP ───────────────────────────────────────────────────────
+nlp:
+  sentiment_threshold: -0.2         # below this = genuine complaint
+  max_complaints_per_category: 500  # cap before CORTEX.COMPLETE — controls cost
+  min_complaints_per_category: 50   # skip categories below this
+  cortex_model: "mistral-7b"
+
+  # confidence tiers — shown in dashboard so user knows data quality
+  confidence_thresholds:
+    high:   300    # 300+ complaints in training data
+    medium: 100    # 100-299 complaints
+    low:    0      # <100 complaints — flag in UI
+
+
+# ── phase 4: ML pipeline ─────────────────────────────────────────────────────
+ml:
+  # BERTopic
+  bertopic:
+    min_topic_size: 10
+    nr_topics: 20
+    language: "english"
+
+  # UMAP
+  umap:
+    n_components: 10
+    n_neighbors: 15
+    min_dist: 0.1
+    metric: "cosine"
+    random_state: 42
+
+  # HDBSCAN
+  hdbscan:
+    min_cluster_size: 5
+    min_samples: 3
+    cluster_selection_method: "eom"
+
+  # Isolation Forest
+  isolation_forest:
+    n_estimators: 200
+    contamination: 0.1
+    random_state: 42
+
+
+# ── phase 5: gap scoring ──────────────────────────────────────────────────────
+gap_scoring:
+  weights:
+    supply_gap:       0.35
+    demand_proxy:     0.35
+    complaint_signal: 0.30
+  min_opportunity_score: 0.40
+  top_n_opportunities: 10
+
+
+# ── phase 5: dashboard ────────────────────────────────────────────────────────
+dashboard:
+  default_map_zoom: 13
+  max_radius_slider_km: 3.0
+  map_tile: "OpenStreetMap"
+  opportunity_colors:
+    high:   "#185FA5"     # blue   — score > 0.75
+    medium: "#BA7517"     # amber  — score 0.50-0.75
+    low:    "#639922"     # green  — score 0.40-0.50

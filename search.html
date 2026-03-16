@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LocalPulse</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:      #F5F3EE;
+    --ink:     #1A1A1A;
+    --muted:   #7A7570;
+    --accent:  #FF4F2B;
+    --card:    #FFFFFF;
+    --border:  #E2DFD8;
+  }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+  }
+
+  .logo {
+    font-family: 'Syne', sans-serif;
+    font-size: 3rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    margin-bottom: 0.3rem;
+    line-height: 1;
+  }
+  .logo span { color: var(--accent); }
+
+  .tagline {
+    font-size: 1rem;
+    color: var(--muted);
+    margin-bottom: 3rem;
+    font-weight: 400;
+  }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2rem;
+    width: 100%;
+    max-width: 560px;
+    box-shadow: 0 2px 24px rgba(0,0,0,0.06);
+  }
+
+  .input-wrap {
+    position: relative;
+    margin-bottom: 1.25rem;
+  }
+  #loc {
+    width: 100%;
+    padding: 14px 18px 14px 48px;
+    font-size: 15px;
+    font-family: 'DM Sans', sans-serif;
+    border: 1.5px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg);
+    color: var(--ink);
+    outline: none;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  #loc:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(255,79,43,0.12);
+    background: #fff;
+  }
+  #loc::placeholder { color: #B0ABA4; }
+  .pin {
+    position: absolute; left: 15px; top: 50%;
+    transform: translateY(-50%);
+    width: 20px; height: 20px;
+    color: var(--muted); pointer-events: none;
+  }
+
+  .radius-row {
+    display: flex; align-items: center;
+    gap: 12px; margin-bottom: 1.5rem;
+  }
+  .radius-row label {
+    font-size: 13px; color: var(--muted);
+    white-space: nowrap; font-weight: 500;
+  }
+  .radius-row input[type=range] {
+    flex: 1; accent-color: var(--accent); cursor: pointer;
+  }
+  .radius-val {
+    font-size: 13px; font-weight: 700;
+    color: var(--accent); min-width: 44px; text-align: right;
+  }
+
+  #scan-btn {
+    width: 100%; padding: 15px;
+    font-size: 15px; font-weight: 700;
+    font-family: 'Syne', sans-serif;
+    letter-spacing: 0.02em;
+    background: var(--accent); color: #fff;
+    border: none; border-radius: 12px;
+    cursor: pointer;
+    transition: background .15s, transform .1s, box-shadow .15s;
+    box-shadow: 0 4px 16px rgba(255,79,43,0.3);
+  }
+  #scan-btn:hover { background: #e63d1a; box-shadow: 0 6px 20px rgba(255,79,43,0.4); }
+  #scan-btn:active { transform: scale(0.98); }
+  #scan-btn:disabled {
+    background: var(--border); color: var(--muted);
+    box-shadow: none; cursor: not-allowed;
+  }
+
+  #confirm {
+    display: none; margin-top: 12px;
+    font-size: 13px; color: #2D7D46;
+    background: #EDFAF2; border-radius: 8px;
+    padding: 8px 12px; line-height: 1.5;
+  }
+
+  /* Google Places dropdown */
+  .pac-container {
+    border-radius: 14px !important;
+    margin-top: 6px !important;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.12) !important;
+    border: 1px solid var(--border) !important;
+    background: #fff !important;
+    font-family: 'DM Sans', sans-serif !important;
+    overflow: hidden;
+  }
+  .pac-icon, .pac-icon-marker { display: none !important; }
+  .pac-item {
+    padding: 11px 18px !important;
+    font-size: 14px !important;
+    cursor: pointer !important;
+    border-top: 1px solid #F0EDE8 !important;
+    background: #fff !important;
+    color: var(--ink) !important;
+    font-family: 'DM Sans', sans-serif !important;
+  }
+  .pac-item:first-child { border-top: none !important; }
+  .pac-item:hover { background: #FFF8F6 !important; }
+  .pac-item-query { font-size: 14px !important; font-weight: 500 !important; color: #1A1A1A !important; }
+  .pac-matched { color: var(--accent) !important; font-weight: 700 !important; }
+  .pac-secondary-text { color: var(--muted) !important; font-size: 12px !important; }
+
+  .footer-note {
+    margin-top: 1.5rem;
+    font-size: 12px; color: var(--muted);
+    text-align: center; line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+
+<div class="logo">Local<span>Pulse</span></div>
+<div class="tagline">Find untapped business opportunities in any US city</div>
+
+<div class="card">
+  <div class="input-wrap">
+    <svg class="pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+      <circle cx="12" cy="10" r="3"/>
+    </svg>
+    <input id="loc" type="text"
+      placeholder="Search any city, neighborhood, or address..."
+      autocomplete="off"/>
+  </div>
+
+  <div class="radius-row">
+    <label>Scan radius</label>
+    <input type="range" id="radius" min="0.5" max="3" step="0.5" value="1.5">
+    <span class="radius-val" id="rval">1.5 km</span>
+  </div>
+
+  <button id="scan-btn" disabled>Select a location first</button>
+  <div id="confirm"></div>
+</div>
+
+<div class="footer-note">
+  Powered by OpenStreetMap · Yelp academic data · GPT-4o<br>
+  ~3 minute scan · free to use
+</div>
+
+<script>
+  var place = null;
+
+  document.getElementById('radius').addEventListener('input', function() {
+    document.getElementById('rval').textContent = this.value + ' km';
+  });
+
+  function initMap() {
+    var input = document.getElementById('loc');
+    var ac = new google.maps.places.Autocomplete(input, {
+      types:  ['geocode', 'establishment'],
+      fields: ['formatted_address', 'name', 'geometry'],
+    });
+    ac.addListener('place_changed', function() {
+      var p = ac.getPlace();
+      if (!p || !p.geometry) return;
+      place = {
+        name: p.formatted_address || p.name,
+        lat:  p.geometry.location.lat(),
+        lng:  p.geometry.location.lng(),
+      };
+      var btn = document.getElementById('scan-btn');
+      btn.disabled    = false;
+      btn.textContent = 'Scan \u2192 ' + place.name.split(',')[0];
+      var c = document.getElementById('confirm');
+      c.style.display = 'block';
+      c.innerHTML = '\u2713 ' + place.name
+        + '<br><small style="color:#7A7570">'
+        + place.lat.toFixed(4) + ', ' + place.lng.toFixed(4) + '</small>';
+    });
+  }
+
+  document.getElementById('scan-btn').addEventListener('click', function() {
+    if (!place) return;
+    var radius = document.getElementById('radius').value;
+    var params = new URLSearchParams({
+      lp_name: place.name, lp_lat: place.lat,
+      lp_lng: place.lng, lp_radius: radius,
+    });
+    this.textContent = 'Opening LocalPulse...';
+    this.disabled = true;
+    window.location.href = 'http://localhost:8501/?' + params.toString();
+  });
+</script>
+
+<script src="config.js"></script>
+<script>
+  var s = document.createElement('script');
+  s.src = 'https://maps.googleapis.com/maps/api/js?key='
+    + (window.LOCALPULSE_CONFIG && window.LOCALPULSE_CONFIG.GOOGLE_MAPS_KEY || '')
+    + '&libraries=places&callback=initMap';
+  s.async = true;
+  document.head.appendChild(s);
+</script>
+</body>
+</html>
