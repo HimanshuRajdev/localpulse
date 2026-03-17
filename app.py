@@ -10,6 +10,9 @@ import subprocess
 import sys
 import time
 
+# ensure src/ is importable on Streamlit Cloud
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import pandas as pd
 import requests
 import snowflake.connector
