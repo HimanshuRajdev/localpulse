@@ -528,7 +528,15 @@ def compute_gaps(
             "avg_lat":               round(center_lat, 5),
             "avg_lng":               round(center_lng, 5),
         })
-
+    if not results:
+        print("  No gaps cleared the minimum score threshold.")
+        return pd.DataFrame(columns=[
+            "cluster_id", "category", "subcategory", "opportunity_score",
+            "supply_gap", "demand_proxy", "complaint_signal",
+            "nearest_competitor_km", "missing_price_tier", "hours_gap",
+            "top_complaint", "recommendation", "business_count",
+            "confidence", "avg_lat", "avg_lng",
+        ])
     gaps = (
         pd.DataFrame(results)
         .sort_values("opportunity_score", ascending=False)
