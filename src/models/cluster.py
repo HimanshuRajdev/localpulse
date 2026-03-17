@@ -1,25 +1,14 @@
 """
-cluster.py
-
-Phase 4 — ML pipeline.
-
-Chain:
-    Snowflake → StandardScaler → UMAP → HDBSCAN → BERTopic
-    → Gap Scorer → LLM Explainer → Snowflake
-
-Usage:
-    python -m src.models.cluster --city "Madison, WI"
-    python -m src.models.cluster --city "Madison, WI" --evaluate
-    python -m src.models.cluster --city "Madison, WI" --ablate
-    python -m src.models.cluster --city "Madison, WI" --explain
+cluster.py — Phase 4 ML pipeline.
 """
 
 import argparse
 import os
+import tempfile
+import uuid
 import warnings
 from pathlib import Path
 
-# cache HuggingFace models to avoid re-downloading on every Streamlit cold start
 os.environ.setdefault("TRANSFORMERS_CACHE", "/tmp/hf_cache")
 os.environ.setdefault("HF_HOME",            "/tmp/hf_cache")
 os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", "/tmp/st_cache")
@@ -46,15 +35,13 @@ CONFIG_PATH = Path("config.yaml")
 FEATURE_COLS = ["rating_norm", "review_log", "avg_sentiment", "negative_ratio"]
 
 
-# ── config ─────────────────────────────────────────────────────────────────
 def load_config() -> dict:
     with open(CONFIG_PATH) as f:
         return yaml.safe_load(f)
 
 
-# ── snowflake ──────────────────────────────────────────────────────────────
 def get_connection():
-    conn=snowflake.connector.connect(
+    conn = snowflake.connector.connect(
         account=os.getenv("SF_ACCOUNT"),
         user=os.getenv("SF_USER"),
         password=os.getenv("SF_PASSWORD"),
@@ -65,7 +52,6 @@ def get_connection():
     cur.execute(f"USE DATABASE {os.getenv('SF_DATABASE')}")
     cur.execute("USE SCHEMA RESULTS")
     return conn
-    
 
 
 def refresh_staging(conn) -> None:
@@ -142,9 +128,6 @@ def refresh_staging(conn) -> None:
 
 def pull_features(city: str, conn) -> pd.DataFrame:
     print(f"\n[1/6] Pulling features for '{city}' from Snowflake...")
-
-    # get the latest scan_id — avoids city name mismatch
-    # (overpass stores coords as city name when --lat/--lng used)
     cur = conn.cursor()
     cur.execute("""
         SELECT scan_id FROM RAW.OSM_BUSINESSES
@@ -209,18 +192,16 @@ def pull_complaints(conn) -> pd.DataFrame:
     return df
 
 
-# ── feature matrix ─────────────────────────────────────────────────────────
 def build_feature_matrix(df: pd.DataFrame) -> np.ndarray:
     print("\n[2/6] Building feature matrix...")
     X = df[FEATURE_COLS].copy()
     for col in FEATURE_COLS:
         X[col] = X[col].fillna(X[col].median())
     X_scaled = StandardScaler().fit_transform(X)
-    print(f"  Shape: {X_scaled.shape}  (businesses × features)")
+    print(f"  Shape: {X_scaled.shape}  (businesses x features)")
     return X_scaled
 
 
-# ── UMAP ───────────────────────────────────────────────────────────────────
 def run_umap(X: np.ndarray, cfg: dict) -> np.ndarray:
     print("\n[3/6] Running UMAP...")
     reducer = umap.UMAP(
@@ -243,7 +224,6 @@ def run_umap_2d(X: np.ndarray) -> np.ndarray:
     ).fit_transform(X)
 
 
-# ── HDBSCAN ────────────────────────────────────────────────────────────────
 def run_hdbscan(X_reduced: np.ndarray, cfg: dict) -> tuple:
     print("\n[4/6] Running HDBSCAN...")
     clusterer = hdbscan.HDBSCAN(
@@ -261,12 +241,11 @@ def run_hdbscan(X_reduced: np.ndarray, cfg: dict) -> tuple:
     print(f"  Clusters : {n_cl}")
     print(f"  Noise    : {noise} ({n_ratio:.1%})")
     if n_ratio > 0.4:
-        print("  ⚠ High noise — lower min_cluster_size in config.yaml")
+        print("  WARNING: High noise - lower min_cluster_size in config.yaml")
 
     return labels, probs, clusterer
 
 
-# ── evaluation ─────────────────────────────────────────────────────────────
 def evaluate_clusters(X_reduced: np.ndarray, labels: np.ndarray, clusterer) -> dict:
     print("\n  --- Cluster Evaluation ---")
     mask = labels != -1
@@ -285,14 +264,12 @@ def evaluate_clusters(X_reduced: np.ndarray, labels: np.ndarray, clusterer) -> d
     print(f"  Noise ratio    : {noise:.1%}  (target < 20%)")
 
     grade = ("excellent" if sil > 0.5 else "good" if sil > 0.35
-             else "fair — tune UMAP/HDBSCAN" if sil > 0.2
-             else "poor — review feature engineering")
+             else "fair - tune UMAP/HDBSCAN" if sil > 0.2
+             else "poor - review feature engineering")
     print(f"  Grade          : {grade}")
     return {"silhouette": sil, "davies_bouldin": db, "noise_ratio": noise}
 
 
-# ── BERTopic ───────────────────────────────────────────────────────────────
-# module-level cache so model loads once per process, not once per scan
 _bertopic_model = None
 
 def run_bertopic(complaints_df: pd.DataFrame, cfg: dict) -> dict:
@@ -301,10 +278,9 @@ def run_bertopic(complaints_df: pd.DataFrame, cfg: dict) -> dict:
     docs = complaints_df["complaint_summary"].dropna().tolist()
 
     if len(docs) < 50:
-        print("  Not enough complaints — skipping")
+        print("  Not enough complaints - skipping")
         return {}
 
-    # sample docs for speed — 2000 is plenty for topic extraction
     if len(docs) > 2000:
         import random
         random.seed(42)
@@ -312,10 +288,8 @@ def run_bertopic(complaints_df: pd.DataFrame, cfg: dict) -> dict:
     else:
         docs_sample = docs
 
-    # reuse cached model if available — saves 60-90s on subsequent scans
     if _bertopic_model is None:
         from sklearn.feature_extraction.text import CountVectorizer
-        # use smaller, faster vectorizer instead of full sentence transformer
         vectorizer = CountVectorizer(
             ngram_range=(1, 2),
             stop_words="english",
@@ -328,7 +302,7 @@ def run_bertopic(complaints_df: pd.DataFrame, cfg: dict) -> dict:
             nr_topics=cfg.get("nr_topics", 20),
             vectorizer_model=vectorizer,
             verbose=False,
-            calculate_probabilities=False,  # faster
+            calculate_probabilities=False,
         )
         print("  Loading BERTopic model...")
     else:
@@ -337,7 +311,6 @@ def run_bertopic(complaints_df: pd.DataFrame, cfg: dict) -> dict:
     topics, _ = _bertopic_model.fit_transform(docs_sample)
     complaints_df = complaints_df.dropna(subset=["complaint_summary"]).copy()
 
-    # map sampled topics back
     if len(docs_sample) < len(docs):
         complaints_df["topic_id"] = -1
         for i, doc in enumerate(docs_sample):
@@ -359,7 +332,6 @@ def run_bertopic(complaints_df: pd.DataFrame, cfg: dict) -> dict:
     return category_topics
 
 
-# ── ablation study ─────────────────────────────────────────────────────────
 def run_ablation(df: pd.DataFrame, cfg: dict):
     print("\n  --- Ablation Study ---")
     hcfg = cfg["ml"]["hdbscan"]
@@ -396,6 +368,36 @@ def run_ablation(df: pd.DataFrame, cfg: dict):
 
 
 # ── push to snowflake ──────────────────────────────────────────────────────
+def _upload_df(conn, df: pd.DataFrame, table: str, stage: str) -> None:
+    """
+    Upload a DataFrame via a named internal stage using PUT + COPY INTO.
+
+    Replaces write_pandas entirely to avoid the tempstage collision bug:
+    write_pandas defaults every call to the same stage name, causing a race
+    when two uploads run back-to-back. Named stages are stable and reused.
+    The parquet file is purged from the stage after a successful COPY.
+    """
+    cur = conn.cursor()
+    cur.execute(f"CREATE STAGE IF NOT EXISTS {stage}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fname = f"{table.lower()}_{uuid.uuid4().hex}.parquet"
+        fpath = Path(tmp) / fname
+        df.to_parquet(fpath, index=False)
+
+        cur.execute(
+            f"PUT file://{fpath} @{stage} AUTO_COMPRESS=TRUE OVERWRITE=TRUE"
+        )
+        cur.execute(f"TRUNCATE TABLE IF EXISTS {table}")
+        cur.execute(f"""
+            COPY INTO {table}
+            FROM @{stage}/{fname}.snappy
+            FILE_FORMAT = (TYPE = PARQUET)
+            MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE
+            PURGE = TRUE
+        """)
+
+
 def push_results(
     df: pd.DataFrame,
     gaps: pd.DataFrame,
@@ -417,28 +419,21 @@ def push_results(
     asgn["umap_y"]       = X_2d[:, 1].round(4)
     asgn.columns         = [c.upper() for c in asgn.columns]
 
-    write_pandas(conn, asgn, "CLUSTER_ASSIGNMENTS",
-                 schema="RESULTS", auto_create_table=False,
-                 overwrite=True, quote_identifiers=False,
-                 stage_name="localpulse_stage_assignments")  # unique stage name prevents collision
+    _upload_df(conn, asgn, "CLUSTER_ASSIGNMENTS", "localpulse_stage_assignments")
     print(f"  CLUSTER_ASSIGNMENTS : {len(asgn):,} rows")
 
     # gap scores
     g = gaps.copy()
     g.columns = [c.upper() for c in g.columns]
-    write_pandas(conn, g, "GAP_SCORES",
-                 schema="RESULTS", auto_create_table=False,
-                 overwrite=True, quote_identifiers=False,
-                 stage_name="localpulse_stage_gaps")  # unique stage name prevents collision
+    _upload_df(conn, g, "GAP_SCORES", "localpulse_stage_gaps")
     print(f"  GAP_SCORES          : {len(g):,} rows")
 
 
-# ── main ───────────────────────────────────────────────────────────────────
 def main(city: str, evaluate: bool, ablate: bool, explain: bool):
     cfg  = load_config()
     conn = get_connection()
 
-    print(f"\nLocalPulse — Phase 4 ML Pipeline")
+    print(f"\nLocalPulse - Phase 4 ML Pipeline")
     print(f"City    : {city}")
     print(f"Flags   : evaluate={evaluate}  ablate={ablate}  explain={explain}")
     print("=" * 55)
@@ -448,10 +443,10 @@ def main(city: str, evaluate: bool, ablate: bool, explain: bool):
     complaints_df = pull_complaints(conn)
 
     if len(df) < 20:
-        print(f"Only {len(df)} businesses — run Overpass scan first.")
+        print(f"Only {len(df)} businesses - run Overpass scan first.")
         return
 
-    X_scaled  = build_feature_matrix(df)
+    X_scaled = build_feature_matrix(df)
 
     if ablate:
         run_ablation(df, cfg)
