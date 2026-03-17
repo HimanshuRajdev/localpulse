@@ -405,7 +405,9 @@ def push_results(
     conn,
 ):
     print("\nPushing results to Snowflake...")
-
+    cur = conn.cursor()
+    cur.execute(f"USE DATABASE {os.getenv('SF_DATABASE')}")
+    cur.execute("USE SCHEMA RESULTS")
     # cluster assignments
     asgn = df[["business_id", "name", "unified_category"]].copy()
     asgn["cluster_id"]   = labels

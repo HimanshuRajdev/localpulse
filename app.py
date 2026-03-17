@@ -323,7 +323,7 @@ def main():
         with mid:
             st.info(
                 "**How it works**\n\n"
-                "1. Open `search.html` in your browser\n"
+                "1. Open `https://d3mh7f3cn8l730.cloudfront.net` in your browser\n"
                 "2. Type any city, neighborhood, or address\n"
                 "3. Select from the Google dropdown\n"
                 "4. Hit Scan — you'll be brought straight here\n\n"
