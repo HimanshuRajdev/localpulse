@@ -54,13 +54,18 @@ def load_config() -> dict:
 
 # ── snowflake ──────────────────────────────────────────────────────────────
 def get_connection():
-    return snowflake.connector.connect(
+    conn=snowflake.connector.connect(
         account=os.getenv("SF_ACCOUNT"),
         user=os.getenv("SF_USER"),
         password=os.getenv("SF_PASSWORD"),
         database=os.getenv("SF_DATABASE"),
         warehouse=os.getenv("SF_WAREHOUSE"),
-    )
+        schema="RESULTS")
+    cur = conn.cursor()
+    cur.execute(f"USE DATABASE {os.getenv('SF_DATABASE')}")
+    cur.execute("USE SCHEMA RESULTS")
+    return conn
+    
 
 
 def refresh_staging(conn) -> None:
