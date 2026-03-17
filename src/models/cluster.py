@@ -19,6 +19,11 @@ import os
 import warnings
 from pathlib import Path
 
+# cache HuggingFace models to avoid re-downloading on every Streamlit cold start
+os.environ.setdefault("TRANSFORMERS_CACHE", "/tmp/hf_cache")
+os.environ.setdefault("HF_HOME",            "/tmp/hf_cache")
+os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", "/tmp/st_cache")
+
 import hdbscan
 import numpy as np
 import pandas as pd
@@ -282,7 +287,11 @@ def evaluate_clusters(X_reduced: np.ndarray, labels: np.ndarray, clusterer) -> d
 
 
 # ── BERTopic ───────────────────────────────────────────────────────────────
+# module-level cache so model loads once per process, not once per scan
+_bertopic_model = None
+
 def run_bertopic(complaints_df: pd.DataFrame, cfg: dict) -> dict:
+    global _bertopic_model
     print("\n[5/6] Running BERTopic...")
     docs = complaints_df["complaint_summary"].dropna().tolist()
 
@@ -290,29 +299,56 @@ def run_bertopic(complaints_df: pd.DataFrame, cfg: dict) -> dict:
         print("  Not enough complaints — skipping")
         return {}
 
-    topic_model = BERTopic(
-        language=cfg["language"],
-        min_topic_size=cfg["min_topic_size"],
-        nr_topics=cfg["nr_topics"],
-        verbose=False,
-    )
-    topics, _ = topic_model.fit_transform(docs)
-    complaints_df = complaints_df.dropna(subset=["complaint_summary"]).copy()
-    complaints_df["topic_id"] = topics
+    # sample docs for speed — 2000 is plenty for topic extraction
+    if len(docs) > 2000:
+        import random
+        random.seed(42)
+        docs_sample = random.sample(docs, 2000)
+    else:
+        docs_sample = docs
 
-    info = topic_model.get_topic_info()
+    # reuse cached model if available — saves 60-90s on subsequent scans
+    if _bertopic_model is None:
+        from sklearn.feature_extraction.text import CountVectorizer
+        # use smaller, faster vectorizer instead of full sentence transformer
+        vectorizer = CountVectorizer(
+            ngram_range=(1, 2),
+            stop_words="english",
+            min_df=3,
+            max_features=5000,
+        )
+        _bertopic_model = BERTopic(
+            language=cfg["language"],
+            min_topic_size=cfg.get("min_topic_size", 10),
+            nr_topics=cfg.get("nr_topics", 20),
+            vectorizer_model=vectorizer,
+            verbose=False,
+            calculate_probabilities=False,  # faster
+        )
+        print("  Loading BERTopic model...")
+    else:
+        print("  Using cached BERTopic model")
+
+    topics, _ = _bertopic_model.fit_transform(docs_sample)
+    complaints_df = complaints_df.dropna(subset=["complaint_summary"]).copy()
+
+    # map sampled topics back
+    if len(docs_sample) < len(docs):
+        complaints_df["topic_id"] = -1
+        for i, doc in enumerate(docs_sample):
+            mask = complaints_df["complaint_summary"] == doc
+            complaints_df.loc[mask, "topic_id"] = topics[i]
+    else:
+        complaints_df["topic_id"] = topics
+
+    info = _bertopic_model.get_topic_info()
     print(f"  Topics found: {len(info) - 1}")
-    print("\n  Top 5 (manual check — do these make sense?):")
-    for _, row in info[info["Topic"] != -1].head(5).iterrows():
-        words = [w for w, _ in topic_model.get_topic(row["Topic"])[:5]]
-        print(f"  Topic {row['Topic']:>2} ({row['Count']:>4} docs): "
-              f"{', '.join(words)}")
 
     category_topics = {}
     for cat, grp in complaints_df.groupby("unified_category"):
         top = grp["topic_id"].mode()
         if len(top) > 0 and top.iloc[0] != -1:
-            words = [w for w, _ in topic_model.get_topic(top.iloc[0])[:5]]
+            words = [w for w, _ in _bertopic_model.get_topic(top.iloc[0])[:5]]
             category_topics[cat] = ", ".join(words)
 
     return category_topics

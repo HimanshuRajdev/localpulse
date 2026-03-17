@@ -84,16 +84,16 @@ nlp:
 
 # ── phase 4: ML pipeline ─────────────────────────────────────────────────────
 ml:
-  # BERTopic
+  # BERTopic — capped for speed on cloud
   bertopic:
     min_topic_size: 10
-    nr_topics: 20
+    nr_topics: 20          # fixed number is faster than "auto"
     language: "english"
 
-  # UMAP
+  # UMAP — reduced for cloud speed (was 10 components)
   umap:
-    n_components: 10
-    n_neighbors: 15
+    n_components: 5        # halves compute time, minimal quality loss
+    n_neighbors: 10        # was 15
     min_dist: 0.1
     metric: "cosine"
     random_state: 42

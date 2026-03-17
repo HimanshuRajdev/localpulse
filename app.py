@@ -253,11 +253,7 @@ def main():
             from src.models.gap_scorer import compute_gaps
 
             cfg  = load_config()
-            conn = sf.connect(
-                account=get_env("SF_ACCOUNT"),   user=get_env("SF_USER"),
-                password=get_env("SF_PASSWORD"),  database=get_env("SF_DATABASE"),
-                warehouse=get_env("SF_WAREHOUSE"),
-            )
+            conn = get_conn()  # reuse cached connection
 
             prog.progress(8,  "Fetching businesses from OpenStreetMap...")
             businesses = scan_city(lat, lng, url_name, radius_km=radius)
@@ -295,7 +291,7 @@ def main():
 
             prog.progress(95, "Saving results...")
             push_results(df, gaps_df, labels, probs, X_2d, conn)
-            conn.close()
+            # don't close — conn is cached and reused across scans
 
             prog.progress(100, "Scan complete!")
             time.sleep(0.5)
