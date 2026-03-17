@@ -20,6 +20,15 @@ from src.models.creative_advisor import generate_creative_ideas
 
 load_dotenv()
 
+
+def get_env(key: str) -> str:
+    """Read from st.secrets (Streamlit Cloud) or .env (local dev)."""
+    try:
+        return st.secrets[key]
+    except Exception:
+        return os.getenv(key, "")
+
+
 st.set_page_config(
     page_title="LocalPulse",
     page_icon="📍",
@@ -81,11 +90,11 @@ st.markdown("""
 @st.cache_resource
 def get_conn():
     return snowflake.connector.connect(
-        account=os.getenv("SF_ACCOUNT"),
-        user=os.getenv("SF_USER"),
-        password=os.getenv("SF_PASSWORD"),
-        database=os.getenv("SF_DATABASE"),
-        warehouse=os.getenv("SF_WAREHOUSE"),
+        account=get_env("SF_ACCOUNT"),
+        user=get_env("SF_USER"),
+        password=get_env("SF_PASSWORD"),
+        database=get_env("SF_DATABASE"),
+        warehouse=get_env("SF_WAREHOUSE"),
     )
 
 
@@ -137,7 +146,7 @@ def run_pipeline(city: str, lat: float, lng: float, radius: float) -> bool:
 
 
 def get_openai_key() -> str:
-    key = os.getenv("OPENAI_API_KEY", "")
+    key = get_env("OPENAI_API_KEY")
     if not key:
         st.error("Add OPENAI_API_KEY to your .env file. Get one at platform.openai.com")
     return key
@@ -230,60 +239,82 @@ def main():
 
         st.info(f"📍 **{url_name}** · {lat:.4f}, {lng:.4f} · {radius} km radius")
 
-        # ── animated progress bar ──────────────────────────────────────────
-        # Each stage has a label and approximate duration
-        # Progress ticks forward in real time as the pipeline runs
-        stages = [
-            (5,  "Connecting to OpenStreetMap..."),
-            (15, "Fetching businesses in area..."),
-            (25, "Uploading to Snowflake..."),
-            (35, "Rebuilding staging tables..."),
-            (50, "Running UMAP dimensionality reduction..."),
-            (62, "Clustering with HDBSCAN..."),
-            (72, "Extracting complaint themes with BERTopic..."),
-            (82, "Scoring market gaps..."),
-            (90, "Generating LLM explanations..."),
-            (95, "Saving results..."),
-        ]
+        # ── inline pipeline with real progress bar ────────────────────────
+        prog = st.progress(0, "Starting scan...")
 
-        prog     = st.progress(0, "Starting scan...")
-        status   = st.empty()
-        stage_i  = [0]
-        done_evt = [False]
+        try:
+            import snowflake.connector as sf
+            from src.ingestion.overpass_client import scan_city, load_to_snowflake
+            from src.models.cluster import (
+                refresh_staging, pull_features, pull_complaints,
+                build_feature_matrix, run_umap, run_umap_2d,
+                run_hdbscan, run_bertopic, push_results, load_config
+            )
+            from src.models.gap_scorer import compute_gaps
 
-        import threading
+            cfg  = load_config()
+            conn = sf.connect(
+                account=get_env("SF_ACCOUNT"),   user=get_env("SF_USER"),
+                password=get_env("SF_PASSWORD"),  database=get_env("SF_DATABASE"),
+                warehouse=get_env("SF_WAREHOUSE"),
+            )
 
-        def tick():
-            while not done_evt[0]:
-                i = stage_i[0]
-                if i < len(stages):
-                    pct, label = stages[i]
-                    prog.progress(pct, label)
-                    stage_i[0] = i + 1
-                time.sleep(18)   # advance one stage every ~18s
+            prog.progress(8,  "Fetching businesses from OpenStreetMap...")
+            businesses = scan_city(lat, lng, url_name, radius_km=radius)
+            if not businesses:
+                st.error("No businesses found. Try a larger radius.")
+                prog.empty(); st.stop()
 
-        ticker = threading.Thread(target=tick, daemon=True)
-        ticker.start()
+            prog.progress(22, "Uploading to Snowflake...")
+            load_to_snowflake(businesses)
 
-        ok = run_pipeline(url_name, lat, lng, radius)
-        done_evt[0] = True
+            prog.progress(34, "Rebuilding staging tables...")
+            refresh_staging(conn)
 
-        if ok:
+            prog.progress(46, "Building feature matrix...")
+            df            = pull_features(url_name, conn)
+            complaints_df = pull_complaints(conn)
+            if len(df) < 10:
+                st.error("Too few businesses found. Try a larger radius.")
+                prog.empty(); st.stop()
+
+            X_scaled = build_feature_matrix(df)
+
+            prog.progress(57, "Running UMAP...")
+            X_reduced = run_umap(X_scaled, cfg["ml"]["umap"])
+            X_2d      = run_umap_2d(X_scaled)
+
+            prog.progress(68, "Clustering with HDBSCAN...")
+            labels, probs, clusterer = run_hdbscan(X_reduced, cfg["ml"]["hdbscan"])
+
+            prog.progress(78, "Extracting complaint themes...")
+            category_topics = run_bertopic(complaints_df, cfg["ml"]["bertopic"])
+
+            prog.progress(88, "Scoring market gaps...")
+            gaps_df = compute_gaps(df, labels, category_topics, cfg)
+
+            prog.progress(95, "Saving results...")
+            push_results(df, gaps_df, labels, probs, X_2d, conn)
+            conn.close()
+
             prog.progress(100, "Scan complete!")
             time.sleep(0.5)
             prog.empty()
-            status.empty()
             load_gaps.clear()
             st.session_state["scanned_city"] = url_name
-            st.session_state["scan_ts"] = time.time()
+            st.session_state["scan_ts"]      = time.time()
             st.session_state["selected_idx"] = 0
             st.session_state.pop("ideas", None)
             st.query_params.clear()
             st.rerun()
-        else:
-            done_evt[0] = True
+
+        except Exception as e:
             prog.empty()
-            status.empty()
+            st.error(f"Scan failed: {e}")
+            import traceback
+            st.code(traceback.format_exc())
+            st.stop()
+
             st.stop()
 
     # ── empty state ────────────────────────────────────────────────────────
@@ -462,7 +493,7 @@ def main():
             "Generate 3 creative business ideas with GPT-4o →",
             type="primary", use_container_width=True
         ):
-            api_key = os.getenv("OPENAI_API_KEY", "")
+            api_key = get_env("OPENAI_API_KEY")
             if not api_key:
                 st.error("Add OPENAI_API_KEY to your .env file. Get one at platform.openai.com")
             else:
