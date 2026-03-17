@@ -408,6 +408,7 @@ def push_results(
     cur = conn.cursor()
     cur.execute(f"USE DATABASE {os.getenv('SF_DATABASE')}")
     cur.execute("USE SCHEMA RESULTS")
+
     # cluster assignments
     asgn = df[["business_id", "name", "unified_category"]].copy()
     asgn["cluster_id"]   = labels
@@ -418,7 +419,8 @@ def push_results(
 
     write_pandas(conn, asgn, "CLUSTER_ASSIGNMENTS",
                  schema="RESULTS", auto_create_table=False,
-                 overwrite=True, quote_identifiers=False)
+                 overwrite=True, quote_identifiers=False,
+                 stage_name="localpulse_stage_assignments")  # unique stage name prevents collision
     print(f"  CLUSTER_ASSIGNMENTS : {len(asgn):,} rows")
 
     # gap scores
@@ -426,7 +428,8 @@ def push_results(
     g.columns = [c.upper() for c in g.columns]
     write_pandas(conn, g, "GAP_SCORES",
                  schema="RESULTS", auto_create_table=False,
-                 overwrite=True, quote_identifiers=False)
+                 overwrite=True, quote_identifiers=False,
+                 stage_name="localpulse_stage_gaps")  # unique stage name prevents collision
     print(f"  GAP_SCORES          : {len(g):,} rows")
 
 
