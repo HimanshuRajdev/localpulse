@@ -19,8 +19,6 @@ venv/
 .DS_Store
 Thumbs.db
 
-# models — too large for git (save to Snowflake stage instead)
-models/
 *.pkl
 *.joblib
 config.js
