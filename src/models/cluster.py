@@ -385,13 +385,16 @@ def _upload_df(conn, df: pd.DataFrame, table: str, stage: str) -> None:
         fpath = Path(tmp) / fname
         df.to_parquet(fpath, index=False)
 
+        # AUTO_COMPRESS=FALSE: parquet is already compressed (snappy by default),
+        # adding gzip on top would make the staged filename <fname>.gz and break
+        # the COPY INTO path reference below.
         cur.execute(
-            f"PUT file://{fpath} @{stage} AUTO_COMPRESS=TRUE OVERWRITE=TRUE"
+            f"PUT file://{fpath} @{stage} AUTO_COMPRESS=FALSE OVERWRITE=TRUE"
         )
         cur.execute(f"TRUNCATE TABLE IF EXISTS {table}")
         cur.execute(f"""
             COPY INTO {table}
-            FROM @{stage}/{fname}.snappy
+            FROM @{stage}/{fname}
             FILE_FORMAT = (TYPE = PARQUET)
             MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE
             PURGE = TRUE
