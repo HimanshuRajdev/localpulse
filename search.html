@@ -7,16 +7,14 @@
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
   :root {
-    --bg:      #F5F3EE;
-    --ink:     #1A1A1A;
-    --muted:   #7A7570;
-    --accent:  #FF4F2B;
-    --card:    #FFFFFF;
-    --border:  #E2DFD8;
+    --bg:     #F5F3EE;
+    --ink:    #1A1A1A;
+    --muted:  #7A7570;
+    --accent: #FF4F2B;
+    --card:   #FFFFFF;
+    --border: #E2DFD8;
   }
-
   body {
     font-family: 'DM Sans', sans-serif;
     background: var(--bg);
@@ -28,7 +26,6 @@
     justify-content: center;
     padding: 2rem;
   }
-
   .logo {
     font-family: 'Syne', sans-serif;
     font-size: 3rem;
@@ -38,14 +35,12 @@
     line-height: 1;
   }
   .logo span { color: var(--accent); }
-
   .tagline {
     font-size: 1rem;
     color: var(--muted);
     margin-bottom: 3rem;
     font-weight: 400;
   }
-
   .card {
     background: var(--card);
     border: 1px solid var(--border);
@@ -55,11 +50,7 @@
     max-width: 560px;
     box-shadow: 0 2px 24px rgba(0,0,0,0.06);
   }
-
-  .input-wrap {
-    position: relative;
-    margin-bottom: 1.25rem;
-  }
+  .input-wrap { position: relative; margin-bottom: 1.25rem; }
   #loc {
     width: 100%;
     padding: 14px 18px 14px 48px;
@@ -84,23 +75,13 @@
     width: 20px; height: 20px;
     color: var(--muted); pointer-events: none;
   }
-
   .radius-row {
     display: flex; align-items: center;
     gap: 12px; margin-bottom: 1.5rem;
   }
-  .radius-row label {
-    font-size: 13px; color: var(--muted);
-    white-space: nowrap; font-weight: 500;
-  }
-  .radius-row input[type=range] {
-    flex: 1; accent-color: var(--accent); cursor: pointer;
-  }
-  .radius-val {
-    font-size: 13px; font-weight: 700;
-    color: var(--accent); min-width: 44px; text-align: right;
-  }
-
+  .radius-row label { font-size: 13px; color: var(--muted); white-space: nowrap; font-weight: 500; }
+  .radius-row input[type=range] { flex: 1; accent-color: var(--accent); cursor: pointer; }
+  .radius-val { font-size: 13px; font-weight: 700; color: var(--accent); min-width: 44px; text-align: right; }
   #scan-btn {
     width: 100%; padding: 15px;
     font-size: 15px; font-weight: 700;
@@ -114,18 +95,18 @@
   }
   #scan-btn:hover { background: #e63d1a; box-shadow: 0 6px 20px rgba(255,79,43,0.4); }
   #scan-btn:active { transform: scale(0.98); }
-  #scan-btn:disabled {
-    background: var(--border); color: var(--muted);
-    box-shadow: none; cursor: not-allowed;
-  }
-
+  #scan-btn:disabled { background: var(--border); color: var(--muted); box-shadow: none; cursor: not-allowed; }
   #confirm {
     display: none; margin-top: 12px;
     font-size: 13px; color: #2D7D46;
     background: #EDFAF2; border-radius: 8px;
     padding: 8px 12px; line-height: 1.5;
   }
-
+  .footer-note {
+    margin-top: 1.5rem;
+    font-size: 12px; color: var(--muted);
+    text-align: center; line-height: 1.6;
+  }
   /* Google Places dropdown */
   .pac-container {
     border-radius: 14px !important;
@@ -151,12 +132,6 @@
   .pac-item-query { font-size: 14px !important; font-weight: 500 !important; color: #1A1A1A !important; }
   .pac-matched { color: var(--accent) !important; font-weight: 700 !important; }
   .pac-secondary-text { color: var(--muted) !important; font-size: 12px !important; }
-
-  .footer-note {
-    margin-top: 1.5rem;
-    font-size: 12px; color: var(--muted);
-    text-align: center; line-height: 1.6;
-  }
 </style>
 </head>
 <body>
@@ -203,6 +178,7 @@
       types:  ['geocode', 'establishment'],
       fields: ['formatted_address', 'name', 'geometry'],
     });
+
     ac.addListener('place_changed', function() {
       var p = ac.getPlace();
       if (!p || !p.geometry) return;
@@ -225,24 +201,35 @@
   document.getElementById('scan-btn').addEventListener('click', function() {
     if (!place) return;
     var radius = document.getElementById('radius').value;
+
+    // read STREAMLIT_URL at click time so config.js is guaranteed loaded
+    var STREAMLIT_URL = (window.LOCALPULSE_CONFIG && window.LOCALPULSE_CONFIG.STREAMLIT_URL)
+      ? window.LOCALPULSE_CONFIG.STREAMLIT_URL
+      : 'https://localpulse.streamlit.app';   // fallback — update this to your real URL
+
     var params = new URLSearchParams({
-      lp_name: place.name, lp_lat: place.lat,
-      lp_lng: place.lng, lp_radius: radius,
+      lp_name:   place.name,
+      lp_lat:    place.lat,
+      lp_lng:    place.lng,
+      lp_radius: radius,
     });
+
     this.textContent = 'Opening LocalPulse...';
     this.disabled = true;
-    window.location.href = 'http://localhost:8501/?' + params.toString();
+    window.location.href = STREAMLIT_URL + '/?' + params.toString();
   });
 </script>
 
+<!-- config.js must load before the Maps script -->
 <script src="config.js"></script>
 <script>
+  // load Google Maps using key from config.js
+  var mapsKey = (window.LOCALPULSE_CONFIG && window.LOCALPULSE_CONFIG.GOOGLE_MAPS_KEY) || '';
   var s = document.createElement('script');
-  s.src = 'https://maps.googleapis.com/maps/api/js?key='
-    + (window.LOCALPULSE_CONFIG && window.LOCALPULSE_CONFIG.GOOGLE_MAPS_KEY || '')
-    + '&libraries=places&callback=initMap';
+  s.src = 'https://maps.googleapis.com/maps/api/js?key=' + mapsKey + '&libraries=places&callback=initMap';
   s.async = true;
   document.head.appendChild(s);
 </script>
+
 </body>
 </html>
