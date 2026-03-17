@@ -1,7 +1,6 @@
 """
 app.py — LocalPulse dashboard.
 Receives location from search.html via URL params, runs pipeline, shows results.
-Based exactly on the working version — only addition is reading URL params on load.
 """
 
 import os
@@ -10,7 +9,6 @@ import subprocess
 import sys
 import time
 
-# ensure src/ is importable on Streamlit Cloud
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import pandas as pd
@@ -25,7 +23,6 @@ load_dotenv()
 
 
 def get_env(key: str) -> str:
-    """Read from st.secrets (Streamlit Cloud) or .env (local dev)."""
     try:
         return st.secrets[key]
     except Exception:
@@ -90,8 +87,7 @@ st.markdown("""
 
 
 # ── snowflake ──────────────────────────────────────────────────────────────
-@st.cache_resource
-def get_conn():
+def _make_conn():
     return snowflake.connector.connect(
         account=get_env("SF_ACCOUNT"),
         user=get_env("SF_USER"),
@@ -100,10 +96,27 @@ def get_conn():
         warehouse=get_env("SF_WAREHOUSE"),
     )
 
+@st.cache_resource
+def _conn_holder() -> dict:
+    """Mutable dict so we can swap out the connection without busting the cache."""
+    return {"conn": _make_conn()}
+
+def get_conn():
+    """Return a live Snowflake connection, reconnecting transparently if stale."""
+    holder = _conn_holder()
+    try:
+        holder["conn"].cursor().execute("SELECT 1")
+    except Exception:
+        try:
+            holder["conn"].close()
+        except Exception:
+            pass
+        holder["conn"] = _make_conn()
+    return holder["conn"]
+
 
 @st.cache_data(ttl=60)
 def load_gaps(city: str) -> pd.DataFrame:
-    """city arg = per-city cache key so switching cities always fetches fresh data."""
     cur = get_conn().cursor()
     cur.execute("""
         SELECT cluster_id, category, subcategory,
@@ -157,20 +170,14 @@ def get_openai_key() -> str:
 
 # ── main ───────────────────────────────────────────────────────────────────
 def fetch_category_detail(category: str) -> dict:
-    """
-    Fetch businesses present and competitor info for a specific category
-    from the latest scan in Snowflake.
-    """
     try:
         cur = get_conn().cursor()
-        # get latest scan_id
         cur.execute("SELECT scan_id FROM RAW.OSM_BUSINESSES ORDER BY scanned_at DESC LIMIT 1")
         row = cur.fetchone()
         if not row:
             return {}
         scan_id = row[0]
 
-        # fetch businesses in this category from latest scan
         cur.execute(f"""
             SELECT b.name, b.lat, b.lng, b.opening_hours
             FROM STAGING.BUSINESSES b
@@ -186,7 +193,6 @@ def fetch_category_detail(category: str) -> dict:
             for r in rows if r[0]
         ]
 
-        # get gap detail for this category
         cur.execute("""
             SELECT nearest_competitor_km, subcategory,
                    hours_gap, missing_price_tier, top_complaint
@@ -197,12 +203,12 @@ def fetch_category_detail(category: str) -> dict:
         gap = cur.fetchone()
 
         return {
-            "businesses":      businesses,
-            "nearest_km":      gap[0] if gap else None,
-            "subcategory":     gap[1] if gap else None,
-            "hours_gap":       gap[2] if gap else None,
-            "price_tier":      gap[3] if gap else None,
-            "top_complaint":   gap[4] if gap else None,
+            "businesses":    businesses,
+            "nearest_km":    gap[0] if gap else None,
+            "subcategory":   gap[1] if gap else None,
+            "hours_gap":     gap[2] if gap else None,
+            "price_tier":    gap[3] if gap else None,
+            "top_complaint": gap[4] if gap else None,
         }
     except Exception:
         return {}
@@ -223,14 +229,13 @@ def main():
     <hr style="border:none;border-top:1.5px solid #E2DFD8;margin-bottom:1.5rem">
     """, unsafe_allow_html=True)
 
-    # ── read URL params from search.html (auto-redirect) ───────────────────
-    params = st.query_params
+    # ── read URL params from search.html ───────────────────────────────────
+    params     = st.query_params
     url_name   = params.get("lp_name",   "")
     url_lat    = params.get("lp_lat",    "")
     url_lng    = params.get("lp_lng",    "")
     url_radius = params.get("lp_radius", "1.5")
 
-    # if search.html redirected here with a new location, run the scan
     if url_name and url_name != st.session_state.get("scanned_city", ""):
         try:
             lat    = float(url_lat)
@@ -242,11 +247,9 @@ def main():
 
         st.info(f"📍 **{url_name}** · {lat:.4f}, {lng:.4f} · {radius} km radius")
 
-        # ── inline pipeline with real progress bar ────────────────────────
         prog = st.progress(0, "Starting scan...")
 
         try:
-            import snowflake.connector as sf
             from src.ingestion.overpass_client import scan_city, load_to_snowflake
             from src.models.cluster import (
                 refresh_staging, pull_features, pull_complaints,
@@ -256,7 +259,7 @@ def main():
             from src.models.gap_scorer import compute_gaps
 
             cfg  = load_config()
-            conn = get_conn()  # reuse cached connection
+            conn = get_conn()
 
             prog.progress(8,  "Fetching businesses from OpenStreetMap...")
             businesses = scan_city(lat, lng, url_name, radius_km=radius)
@@ -294,7 +297,6 @@ def main():
 
             prog.progress(95, "Saving results...")
             push_results(df, gaps_df, labels, probs, X_2d, conn)
-            # don't close — conn is cached and reused across scans
 
             prog.progress(100, "Scan complete!")
             time.sleep(0.5)
@@ -302,6 +304,7 @@ def main():
             load_gaps.clear()
             st.session_state["scanned_city"] = url_name
             st.session_state["scan_ts"]      = time.time()
+            st.session_state["biz_count"]    = len(df)   # ← set here so metric works
             st.session_state["selected_idx"] = 0
             st.session_state.pop("ideas", None)
             st.query_params.clear()
@@ -312,8 +315,6 @@ def main():
             st.error(f"Scan failed: {e}")
             import traceback
             st.code(traceback.format_exc())
-            st.stop()
-
             st.stop()
 
     # ── empty state ────────────────────────────────────────────────────────
@@ -345,13 +346,11 @@ def main():
         return
 
     # ── gap summary ────────────────────────────────────────────────────────
-    # compute score from default weights (0.35 / 0.35 / 0.30)
     gaps["score"] = (
         0.35 * gaps["supply_gap"]
         + 0.35 * gaps["demand_proxy"]
         + 0.30 * gaps["complaint_signal"]
     ).round(3)
-    # deduplicate — keep best score per category only
     gaps = (
         gaps.sort_values("score", ascending=False)
         .drop_duplicates(subset=["category"], keep="first")
@@ -366,11 +365,16 @@ def main():
         unsafe_allow_html=True
     )
 
-    m1, m2, m3, m4 = st.columns(4)
+    # only show Businesses metric if we have the count
+    biz_count = st.session_state.get("biz_count")
+    if biz_count:
+        m1, m2, m3, m4 = st.columns(4)
+        m4.metric("Businesses", biz_count)
+    else:
+        m1, m2, m3 = st.columns(3)
     m1.metric("Gaps found",     len(gaps))
     m2.metric("Top score",      f"{gaps['score'].max():.2f}")
     m3.metric("Avg supply gap", f"{gaps['supply_gap'].mean():.2f}")
-    m4.metric("Businesses",     st.session_state.get("biz_count", "—"))
     st.markdown("")
 
     # ── gap pills + complaint summary ──────────────────────────────────────
@@ -391,16 +395,14 @@ def main():
             unsafe_allow_html=True
         )
 
-        # clickable pill buttons — 5 per row
-        chunk = 5
+        chunk    = 5
         gap_list = list(gaps.iterrows())
         for i in range(0, len(gap_list), chunk):
             slice_ = gap_list[i:i+chunk]
-            cols = st.columns(len(slice_))
+            cols   = st.columns(len(slice_))
             for col, (_, gap_row) in zip(cols, slice_):
                 score = gap_row["score"]
                 cat   = gap_row["category"].replace("_", " ").title()
-                color = "#FF4F2B" if score >= 0.6 else "#BA7517"
                 with col:
                     label = f"{cat}  {score:.2f}"
                     if st.button(label, key=f"pill_{gap_row['category']}",
@@ -412,7 +414,6 @@ def main():
                         )
                         st.rerun()
 
-        # detail panel for selected category
         selected_cat = st.session_state.get("selected_category")
         if selected_cat:
             matched = gaps[gaps["category"] == selected_cat]
@@ -470,7 +471,6 @@ def main():
 
                 st.markdown('</div>', unsafe_allow_html=True)
 
-        # complaint themes row
         if top_themes:
             st.markdown(
                 '<div style="font-size:11px;font-weight:500;color:#7A7570;'
@@ -485,7 +485,6 @@ def main():
             ])
             st.markdown(theme_html, unsafe_allow_html=True)
 
-
     # ── GPT-4o ideas ───────────────────────────────────────────────────────
     if "gpt_ideas" not in st.session_state:
         if st.button(
@@ -498,11 +497,7 @@ def main():
             else:
                 with st.spinner("GPT-4o is analysing all gaps and thinking like an entrepreneur..."):
                     try:
-                        ideas = generate_creative_ideas(
-                            gaps,
-                            city_label,
-                            api_key,
-                        )
+                        ideas = generate_creative_ideas(gaps, city_label, api_key)
                         st.session_state["gpt_ideas"] = ideas
                         st.rerun()
                     except ValueError as e:
@@ -519,7 +514,6 @@ def main():
 
         for i, idea in enumerate(ideas, 1):
             with st.container(border=True):
-                # header row
                 hc, fc = st.columns([3, 1])
                 with hc:
                     st.caption(f"IDEA {i}  ·  addresses: {', '.join(idea.get('gaps_addressed', []))}")
@@ -534,13 +528,11 @@ def main():
                         unsafe_allow_html=True,
                     )
 
-                # description
                 st.write(idea.get("description", ""))
 
-                # why now + first step + capital
                 cap = idea.get("startup_angle", "medium").lower()
                 cbg = capital_bg.get(cap, "#F4F6F8")
-                cfg = capital_fg.get(cap, "#555")
+                cfg_color = capital_fg.get(cap, "#555")
 
                 r1, r2, r3 = st.columns(3)
                 with r1:
@@ -560,7 +552,7 @@ def main():
                 with r3:
                     st.markdown(
                         f"<div style='background:{cbg};border-radius:8px;"
-                        f"padding:8px 10px;font-size:12px;color:{cfg}'>"
+                        f"padding:8px 10px;font-size:12px;color:{cfg_color}'>"
                         f"<b>Capital needed</b><br>{cap}</div>",
                         unsafe_allow_html=True,
                     )
@@ -570,7 +562,6 @@ def main():
             del st.session_state["gpt_ideas"]
             st.rerun()
 
-        # expandable raw data for reference
         with st.expander("View all gap scores"):
             show_cols = ["category", "score", "supply_gap",
                          "demand_proxy", "complaint_signal",
