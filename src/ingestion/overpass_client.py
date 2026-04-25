@@ -21,7 +21,6 @@ Usage:
 
 import argparse
 import os
-import time
 import uuid
 from collections import Counter
 
@@ -33,10 +32,14 @@ from snowflake.connector.pandas_tools import write_pandas
 
 load_dotenv()
 
-OVERPASS_URL   = "https://overpass-api.de/api/interpreter"
+OVERPASS_URLS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.karte.io/api/interpreter",
+    "https://overpass.openstreetmap.ru/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+]
 NOMINATIM_URL  = "https://nominatim.openstreetmap.org/search"
 TIMEOUT_S      = 60
-RETRY_ATTEMPTS = 3
 RETRY_BACKOFF  = 5
 
 
@@ -70,28 +73,24 @@ def geocode(city_name: str) -> tuple | None:
         return None
 
 
-def fetch_overpass(query: str, attempt: int = 1) -> dict | None:
-    try:
-        response = requests.post(OVERPASS_URL, data={"data": query}, timeout=TIMEOUT_S)
-        if response.status_code == 200:
-            return response.json()
-        wait = RETRY_BACKOFF * (2 ** (attempt - 1))
-        if response.status_code in (429, 504):
-            print(f"  HTTP {response.status_code} — waiting {wait}s (attempt {attempt}/{RETRY_ATTEMPTS})")
-            time.sleep(wait)
-        else:
-            print(f"  HTTP {response.status_code} — skipping")
-            return None
-    except requests.exceptions.Timeout:
-        print(f"  Timeout (attempt {attempt}/{RETRY_ATTEMPTS})")
-        time.sleep(RETRY_BACKOFF)
-    except requests.exceptions.ConnectionError:
-        print(f"  Connection error (attempt {attempt}/{RETRY_ATTEMPTS})")
-        time.sleep(RETRY_BACKOFF)
-
-    if attempt < RETRY_ATTEMPTS:
-        return fetch_overpass(query, attempt + 1)
-    print("  All retries exhausted")
+def fetch_overpass(query: str) -> dict | None:
+    for url in OVERPASS_URLS:
+        try:
+            print(f"  Trying {url} ...")
+            response = requests.post(url, data={"data": query}, timeout=TIMEOUT_S)
+            if response.status_code == 200:
+                return response.json()
+            if response.status_code == 429:
+                print(f"  Rate limited — skipping")
+            else:
+                print(f"  HTTP {response.status_code} — skipping")
+        except requests.exceptions.Timeout:
+            print(f"  Timeout — skipping")
+        except requests.exceptions.ConnectionError:
+            print(f"  Connection error — skipping")
+        except Exception as e:
+            print(f"  Error: {e} — skipping")
+    print("  All servers failed")
     return None
 
 
