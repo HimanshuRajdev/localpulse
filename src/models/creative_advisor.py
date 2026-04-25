@@ -26,81 +26,114 @@ OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 def build_prompt(gaps: pd.DataFrame, city: str) -> str:
     """
     Build a rich prompt that gives GPT-4o the full gap analysis context.
-    The more specific the input, the more specific the output.
+    The model reasons across all gaps holistically.
     """
-    # build gap summary — top 8 gaps with key signals
+
     gap_lines = []
     for _, row in gaps.head(8).iterrows():
         line = (
             f"- {row['category'].replace('_',' ').title()}"
             f" (score {row['opportunity_score']:.2f})"
-            f": supply gap={row['supply_gap']:.2f}"
+            f": supply_gap={row['supply_gap']:.2f}"
             f", demand={row['demand_proxy']:.2f}"
             f", complaint signal={row['complaint_signal']:.2f}"
         )
+
         if row.get("subcategory"):
             line += f" | specific gap: {row['subcategory']}"
         if row.get("nearest_competitor_km"):
             line += f" | nearest competitor: {row['nearest_competitor_km']}km"
         if row.get("missing_price_tier"):
             line += f" | missing: {row['missing_price_tier']}"
+
         hours = row.get("hours_gap") or ""
         if hours and hours not in ("hours data unavailable", "reasonable coverage"):
             line += f" | hours gap: {hours}"
+
         complaint = row.get("top_complaint") or ""
         clean = ", ".join([w for w in complaint.split(", ") if len(w) >= 4])
         if clean:
             line += f" | complaint themes: {clean}"
+
         gap_lines.append(line)
 
     gaps_text = "\n".join(gap_lines)
 
-    # top complaint themes across all gaps
+    from collections import Counter
     all_complaints = []
     for _, row in gaps.iterrows():
         c = row.get("top_complaint") or ""
         words = [w for w in c.split(", ") if len(w) >= 4]
         all_complaints.extend(words)
-    from collections import Counter
+
     top_themes = ", ".join([w for w, _ in Counter(all_complaints).most_common(8)])
 
-    return f"""You are an entrepreneurial advisor who identifies genuine, underserved local business opportunities.
+    return f"""You are an entrepreneurial advisor analyzing real-world local service gaps in {city}.
 
-MARKET ANALYSIS FOR {city}:
+MARKET DATA:
 
 {gaps_text}
 
-Recurring customer complaints in this area: {top_themes or "not identified"}
+Recurring customer complaints in this area:
+{top_themes or "not identified"}
 
 YOUR TASK:
-Generate exactly 3 specific, creative business ideas for {city}.
+Generate exactly 3 highly specific, physically grounded business ideas for {city}.
 
-STRICT RULES — read carefully:
-1. Each idea must solve a PHYSICAL, LOCAL problem — not a mobile app, not a platform, not "an app that connects X with Y". People. Places. Real services.
-2. The problem must NOT already be solved by existing businesses in the area — the gap data confirms this.
-3. Focus on the highest-scoring gaps (supply_gap > 0.7 means nearly zero competition).
-4. Only combine gaps if two gaps are naturally complementary (e.g. late-night + medical = after-hours clinic). Do NOT force combinations just to seem clever.
-5. Each idea must specify: exactly where it operates (storefront / kiosk / mobile van / dark kitchen / pop-up), what hours, what price point.
-6. Reference specific numbers from the data — competitor distance, supply gap score, complaint themes. Generic ideas are rejected.
-7. Think about what exists in bigger cities that hasn't reached this area yet.
-8. No vague ideas. "A wellness studio" is rejected. "A mobile sports recovery van operating Fri-Sun near the sports complex, $40/session" is accepted.
+CORE RULES:
 
-Respond with valid JSON only, no markdown:
+1. Each idea must solve a REAL physical-world service gap (storefront, kiosk, mobile van, pop-up, hybrid logistics service).
+   - Apps are allowed ONLY if they coordinate or enable a physical service.
+   - Reject ideas that are purely digital marketplaces or already-saturated national services.
+
+2. Only use opportunities where supply_gap >= 0.6.
+   - Prioritize higher values first.
+
+3. STRICTLY reject commodity markets that already have dominant national players:
+   - grocery delivery, food delivery, ride-hailing, generic tutoring, basic e-commerce resellers.
+
+4. Each idea must explicitly reference at least one data signal:
+   - supply_gap score OR
+   - competitor distance OR
+   - complaint theme OR
+   - service coverage gap
+
+5. Each idea must specify:
+   - exact physical format (storefront / van / kiosk / pop-up / hybrid)
+   - exact location context (district, corridor, or landmark zone)
+   - operating hours justified by local behavior patterns
+   - realistic price point
+
+6. Time-of-day logic must match US urban/suburban behavior:
+   - Do NOT assume demand exists for late-night service unless supported by data
+   - Valid only in contexts like hospital zones, campuses, airports, nightlife districts
+
+7. Explain WHY competitors fail despite existing presence:
+   - distance friction
+   - poor coverage
+   - long wait times
+   - mismatch in service type
+
+8. Think like a city operator, not a startup ideation tool:
+   - focus on missing physical infrastructure or service delivery gaps seen in larger cities but absent here
+
+OUTPUT FORMAT:
+Return valid JSON only. No markdown, no explanation.
+
 {{
   "city": "{city}",
   "ideas": [
     {{
-      "title": "specific descriptive name",
-      "format": "exact physical format and location type",
-      "gaps_addressed": ["primary gap"],
-      "description": "2-3 sentences — name the specific gap score, competitor distance, or complaint theme that proves this is needed. Describe exactly what the business does, who it serves, and why it wins.",
-      "why_now": "cite the exact data point — e.g. supply_gap=0.94, nearest competitor 3.2km away, zero late-night coverage",
-      "startup_angle": "low / medium / high capital",
-      "first_step": "one concrete action completable in 2 weeks to validate demand"
+      "title": "",
+      "format": "",
+      "gaps_addressed": [""],
+      "description": "",
+      "why_now": "",
+      "startup_angle": "low | medium | high",
+      "first_step": ""
     }}
   ]
 }}"""
-
 
 # ── GPT-4o caller ──────────────────────────────────────────────────────────
 def call_gpt4o(prompt: str, api_key: str) -> dict | None:
