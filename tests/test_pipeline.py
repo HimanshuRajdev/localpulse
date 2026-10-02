@@ -103,3 +103,21 @@ def test_ideas_validates_input(monkeypatch):
     assert seen["gaps"][0]["label"] == "Fitness" and "evil" not in seen["gaps"][0]
     assert seen["gaps"][0]["nearest"][0]["name"] == "Gym A"
     assert seen["ctx"]["place"] == "Madison" and seen["ctx"]["residents_estimate"] is None
+
+
+def test_region_from_browser(monkeypatch):
+    called = []
+    monkeypatch.setattr(handler, "fetch_businesses", lambda lat, lng, r: (parse(elements()), "test"))
+    monkeypatch.setattr(handler, "region_counts", lambda *a: called.append(1))
+    monkeypatch.setattr(handler, "census_residents", lambda lat, lng, r: None)
+    counts = ",".join(str(REGION["counts"][c]) for c in REGION["counts"])
+    res = handler.lambda_handler(_event("/api/scan", query={
+        "lat": "43.0731", "lng": "-89.4012", "region": counts, "region_r": "4.5"}))
+    body = json.loads(res["body"])
+    assert body["model"]["benchmark"] == "the surrounding 4.5 km" and not called
+    # garbage from the browser is ignored, and "skip" means don't retry on the server
+    assert handler._parse_region("1,2,x", "4.5") is None
+    res = handler.lambda_handler(_event("/api/scan", query={"lat": "43.08", "lng": "-89.40", "region": "skip"}))
+    assert "Yelp" in json.loads(res["body"])["model"]["benchmark"] and not called
+    q = json.loads(handler.lambda_handler(_event("/api/region-query", query={"lat": "43", "lng": "-89"}))["body"])
+    assert q["query"].count("out count;") == 14 and q["mirrors"]

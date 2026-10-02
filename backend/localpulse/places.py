@@ -15,6 +15,7 @@ import json
 import os
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 from . import overpass
 from .categories import osm_category
@@ -23,7 +24,7 @@ GEOAPIFY_URL = "https://api.geoapify.com/v2/places"
 GEOAPIFY_CATEGORIES = ("catering,commercial,healthcare,service,sport,childcare,"
                        "education,pet,entertainment")
 PAGE = 500
-MAX_PAGES = 3
+MAX_PAGES = 2
 
 # Geoapify category -> (osm key, osm value); used only when the raw OSM
 # tags are missing from a result. Longest matching prefix wins.
@@ -98,26 +99,46 @@ def _tags_from_geoapify(props: dict) -> dict:
     return tags
 
 
-def geoapify_elements(lat: float, lng: float, radius_km: float, key: str) -> list:
-    """Geoapify results reshaped to look like Overpass elements."""
-    elements = []
+def _geoapify_category(lat, lng, radius_km, key, category) -> list:
+    """All pages for one top-level category. An unknown category name makes
+    Geoapify return an empty list rather than an error, which is why each
+    category gets its own request: one bad name can't blank the whole scan."""
+    out = []
     for page in range(MAX_PAGES):
         q = urllib.parse.urlencode({
-            "categories": GEOAPIFY_CATEGORIES,
+            "categories": category,
             "filter": f"circle:{lng:.6f},{lat:.6f},{int(radius_km * 1000)}",
             "limit": PAGE, "offset": page * PAGE, "apiKey": key,
-        }, safe=",:")   # Geoapify expects literal commas in the category list
-        req = urllib.request.Request(f"{GEOAPIFY_URL}?{q}",
-                                     headers={"Accept": "application/json"})
+        }, safe=",:")
+        req = urllib.request.Request(f"{GEOAPIFY_URL}?{q}", headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=15) as resp:
-            payload = json.loads(resp.read())
-        features = payload.get("features") or []
-        if page == 0:
-            sample = features[0].get("properties", {}) if features else payload
-            print(f"[geoapify] {len(features)} features on first page; "
-                  f"sample: {json.dumps(sample)[:600]}", flush=True)
+            features = json.loads(resp.read()).get("features") or []
+        out += features
+        if len(features) < PAGE:
+            break
+    return out
+
+
+def geoapify_elements(lat: float, lng: float, radius_km: float, key: str) -> list:
+    """Geoapify results reshaped to look like Overpass elements."""
+    cats = GEOAPIFY_CATEGORIES.split(",")
+    with ThreadPoolExecutor(max_workers=len(cats)) as pool:
+        results = dict(zip(cats, pool.map(
+            lambda c: _safe(lambda: _geoapify_category(lat, lng, radius_km, key, c)), cats)))
+    print("[geoapify] features per category: "
+          + ", ".join(f"{c}={len(v) if isinstance(v, list) else v}" for c, v in results.items()), flush=True)
+    if all(isinstance(v, Exception) for v in results.values()):
+        raise next(iter(results.values()))
+
+    elements, seen = [], set()
+    for features in results.values():
+        if isinstance(features, Exception):
+            continue
         for f in features:
             p = f.get("properties", {})
+            if p.get("place_id") in seen:   # a place can sit in two top-level categories
+                continue
+            seen.add(p.get("place_id"))
             coords = (f.get("geometry") or {}).get("coordinates") or [None, None]
             raw = (p.get("datasource") or {}).get("raw") or {}
             tags = _tags_from_geoapify(p)
@@ -126,13 +147,18 @@ def geoapify_elements(lat: float, lng: float, radius_km: float, key: str) -> lis
             tags["opening_hours"] = hours if isinstance(hours, str) else ""
             elements.append({
                 "type": raw.get("osm_type", "g"),
-                "id": raw.get("osm_id") or p.get("place_id", "")[:16],
+                "id": raw.get("osm_id") or (p.get("place_id") or "")[:16],
                 "lat": p.get("lat", coords[1]), "lon": p.get("lon", coords[0]),
                 "tags": tags,
             })
-        if len(features) < PAGE:
-            break
     return elements
+
+
+def _safe(fn):
+    try:
+        return fn()
+    except Exception as e:
+        return e
 
 
 def fetch_businesses(lat: float, lng: float, radius_km: float) -> tuple[list[dict], str]:

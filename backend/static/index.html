@@ -331,6 +331,31 @@
   // ── scan ───────────────────────────────────────────────────────────────
   function setStatus(html, err) { $('status').innerHTML = html ? `<div class="status${err ? ' err' : ''}">${html}</div>` : ''; }
 
+  // Surrounding-area counts come straight from Overpass in the browser:
+  // Overpass rate-limits the shared AWS addresses the backend runs on, but a
+  // visitor's own connection is fine. Cached for a day per spot.
+  async function regionCounts(p, radius) {
+    const key = `lp-region:${(+p.lat).toFixed(2)},${(+p.lng).toFixed(2)},${radius}`;
+    try { const hit = JSON.parse(localStorage.getItem(key) || 'null');
+          if (hit && Date.now() - hit.t < 864e5) return hit.v; } catch {}
+    try {
+      const rq = await (await fetch(`/api/region-query?lat=${p.lat}&lng=${p.lng}&radius=${radius}`)).json();
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 15000);
+      const body = new URLSearchParams({ data: rq.query });
+      const v = await Promise.any(rq.mirrors.map(async (u) => {
+        const r = await fetch(u, { method: 'POST', body, signal: ctrl.signal });
+        if (!r.ok) throw new Error(r.status);
+        const counts = (await r.json()).elements.filter(e => e.type === 'count').map(e => +e.tags.total);
+        if (counts.length !== 14 || counts.reduce((a, b) => a + b, 0) < 30) throw new Error('bad counts');
+        return { counts: counts.join(','), r: rq.radius_km };
+      }));
+      clearTimeout(timer); ctrl.abort();
+      try { localStorage.setItem(key, JSON.stringify({ t: Date.now(), v })); } catch {}
+      return v;
+    } catch { return null; }
+  }
+
   async function runScan(p, radius, namePromise) {
     busy = true; go.disabled = true;
     $('map-hint').hidden = true;
@@ -340,11 +365,16 @@
       map.fitBounds(ring.getBounds(), { padding: [20, 20] });
     }
     setStatus('<span class="dots">Looking up businesses within ' + radius + ' km</span>');
+    const regionPromise = regionCounts(p, radius);
     if (namePromise) { const nm = await namePromise; if (nm) { p.name = nm; q.value = nm; } }
     const params = new URLSearchParams({ lat: (+p.lat).toFixed(5), lng: (+p.lng).toFixed(5), radius, name: p.name });
     history.replaceState(null, '', '?' + params);
     try {
-      const r = await fetch('/api/scan?' + params);
+      const region = await regionPromise;
+      const apiParams = new URLSearchParams(params);
+      if (region) { apiParams.set('region', region.counts); apiParams.set('region_r', region.r); }
+      else apiParams.set('region', 'skip');
+      const r = await fetch('/api/scan?' + apiParams);
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'The scan failed.');
       if (d.warning) throw new Error(d.warning);

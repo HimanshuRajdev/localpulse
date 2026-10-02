@@ -46,7 +46,7 @@ def region_counts(lat: float, lng: float, radius_km: float) -> dict | None:
     if hit and time.time() - hit[0] < CACHE_TTL_S:
         return hit[1]
     try:
-        elements = overpass.run_query(build_count_query(lat, lng, r), timeout=25)
+        elements = overpass.run_query(build_count_query(lat, lng, r), timeout=15)
     except Exception as e:
         print(f"[region] count query failed: {e}", flush=True)
         return None

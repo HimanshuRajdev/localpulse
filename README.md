@@ -7,21 +7,23 @@ Pick any neighborhood and LocalPulse tells you which kinds of local businesses a
 ## What it does
 
 1. **Maps the supply.** Every named business within 0.5 to 3 km of the point you pick, pulled live from OpenStreetMap and sorted into 14 categories (restaurants, cafes, medical, fitness, pet services and so on).
-2. **Compares it to a benchmark.** 118,607 businesses from the Yelp Open Dataset give the usual category mix for urban cores, mixed areas and suburbs. A downtown is compared with other downtowns, so it isn't flagged for having few gas stations the way a suburb would be.
-3. **Scores every category.** HDBSCAN segments the local market by rating, review sentiment, complaint rate and density. Each category then gets an opportunity score.
-4. **Pressure-tests ideas.** An LLM reads the top gaps and proposes three businesses. The prompt makes it explain why each gap is real and what usually kills that kind of business, instead of just cheerleading.
+2. **Compares it to its surroundings.** The same OpenStreetMap categories are counted across the wider 4 to 6 km area. A category is a gap when its share of local businesses is much smaller than its share around it (a location quotient, standard in economic geography). Using the same source on both sides means mapping quirks cancel out, and a downtown is judged against its own city.
+3. **Counts the people it serves.** 2020 Census population for the tracts around the point gives residents per business ("1 vet per 18,000 residents").
+4. **Scores every category.** HDBSCAN segments the local market by rating, review sentiment, complaint rate and density, and the thinnest segment sharpens the supply signal.
+5. **Pressure-tests ideas.** An LLM first rules out gaps with an obvious structural reason (no car washes where nobody owns a car), then proposes three businesses for what's left, each with a named customer, a location, price math and a first step under $500.
 
 ## How the score works
 
 ```
-opportunity = 0.35 × supply_gap + 0.35 × demand + 0.30 × complaints
+opportunity = 0.65 × short_supply + 0.35 × demand
 ```
 
 | Signal | What it measures | Source |
 |---|---|---|
-| `supply_gap` | How far below the benchmark count this category is, sharpened by how sparse its thinnest HDBSCAN segment is. Zero when the area already has more than typical. | OSM scan vs Yelp category mix for the same density tier |
-| `demand` | How much people review this category nationally (a proxy for how much they use it), plus how busy the scanned area is | Yelp review counts, OSM business density |
-| `complaints` | Share of 1 and 2 star reviews for the category, scaled across categories | 1.8M Yelp reviews |
+| `short_supply` | How far below the expected count this category is, where expected = local business total × the category's share in the surrounding area. Zero when the area already has its share. | OSM scan vs OSM counts for the surrounding 4 to 6 km |
+| `demand` | How much people use this kind of business (national review volume) and how many residents live here | Yelp review counts, 2020 Census |
+
+Complaint rates from 1.8M Yelp reviews are the same everywhere for a category, so they aren't used for ranking. They're shown as context and passed to the LLM. If the surrounding-area count fails, the app falls back to the Yelp category mix for areas of the same density and says so on the page.
 
 Each gap also comes with specifics: which subtype is missing entirely (e.g. no walk-in clinic), the nearest existing competitor, holes in opening hours (nothing open after 7pm, closed weekends) and the most distinctive complaint phrases for that category, found with class-based TF-IDF over sampled negative reviews.
 
@@ -31,11 +33,11 @@ Each gap also comes with specifics: which subtype is missing entirely (e.g. no w
 Browser ──► Lambda Function URL (one link)
               │
               ├─ GET  /              single-page app (HTML, Leaflet map, Photon search)
-              ├─ GET  /api/scan      places ─► features ─► HDBSCAN ─► gap scores
-              │                        │
-              │                        ├─ Geoapify Places API (fast, free tier)
-              │                        └─ Overpass API (fallback, queried on all mirrors at once)
-              └─ POST /api/ideas     OpenAI (gpt-4o-mini by default)
+              ├─ GET  /api/scan      three lookups in parallel ─► features ─► HDBSCAN ─► gap scores
+              │                        ├─ businesses: Geoapify Places API, Overpass as fallback
+              │                        ├─ surrounding-area counts: one Overpass count query
+              │                        └─ residents: US Census geocoder (2020 tracts)
+              └─ POST /api/ideas     OpenAI (gpt-4o by default)
 
 Yelp benchmarks: built offline once ─► backend/localpulse/data/category_stats.json (6 KB)
 ```
@@ -47,7 +49,7 @@ Hosting is one AWS Lambda function (container image, 1 GB memory) with a Functio
 ## Honest limitations
 
 - OpenStreetMap coverage varies. A neighborhood with poorly mapped shops will look emptier than it is.
-- The Yelp dataset covers about a dozen US and Canadian metro areas, so the benchmark is a national-ish average, not specific to your city.
+- The location quotient says an area has less of something than its surroundings, not that the surroundings are well served. Residents are estimated from census tracts and ignore daytime workers and visitors.
 - Category features come from Yelp averages per category, so businesses in the same category share most of their feature values. The silhouette score is high partly for that reason and shouldn't be read as proof of rich structure.
 - The LLM ideas are a starting point for thinking, not business advice.
 
@@ -55,7 +57,7 @@ Hosting is one AWS Lambda function (container image, 1 GB memory) with a Functio
 
 ```bash
 pip install -r backend/requirements.txt pytest
-pytest                                   # 7 tests, no network needed
+pytest                                   # 8 tests, no network needed
 python scripts/dev_server.py             # http://localhost:8000 with live data
 python scripts/dev_server.py --offline   # canned Madison data, no keys needed
 ```

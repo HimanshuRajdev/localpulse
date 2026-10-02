@@ -21,7 +21,8 @@ from localpulse.categories import CATEGORIES, LABELS
 from localpulse.ideas import IdeasError, generate_ideas
 from localpulse.places import PlacesError, fetch_businesses
 from localpulse.census import residents as census_residents
-from localpulse.region import region_counts
+from localpulse.overpass import MIRRORS
+from localpulse.region import build_count_query, region_counts, region_radius
 from localpulse.scoring import score_area
 
 INDEX_HTML = (Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
@@ -58,7 +59,10 @@ def scan(params: dict) -> dict:
     radius = min(max(radius, 0.5), 3.0)
     name = (params.get("name") or f"{lat:.4f}, {lng:.4f}")[:120]
 
-    key = (round(lat, 3), round(lng, 3), radius)
+    region_from_client = _parse_region(params.get("region"), params.get("region_r"))
+    skip_server_region = params.get("region") == "skip"
+
+    key = (round(lat, 3), round(lng, 3), radius, bool(region_from_client))
     hit = _scan_cache.get(key)
     if hit and time.time() - hit[0] < CACHE_TTL_S:
         return _json(200, {**hit[1], "place": name, "cached": True})
@@ -67,7 +71,10 @@ def scan(params: dict) -> dict:
     # the three lookups are independent, so run them at the same time
     pool = ThreadPoolExecutor(max_workers=3)
     f_biz = pool.submit(fetch_businesses, lat, lng, radius)
-    f_region = pool.submit(region_counts, lat, lng, radius)
+    if region_from_client or skip_server_region:
+        f_region = pool.submit(lambda: region_from_client)
+    else:
+        f_region = pool.submit(region_counts, lat, lng, radius)
     f_people = pool.submit(census_residents, lat, lng, radius)
     try:
         businesses, source = f_biz.result()
@@ -99,6 +106,33 @@ def scan(params: dict) -> dict:
         _scan_cache.clear()
     _scan_cache[key] = (time.time(), body)
     return _json(200, body)
+
+
+def _parse_region(raw, r) -> dict | None:
+    """Surrounding-area counts sent by the browser: 14 ints in CATEGORIES order.
+    The browser queries Overpass itself because Overpass rate-limits the shared
+    AWS addresses that Lambda calls from."""
+    if not raw or raw == "skip":
+        return None
+    try:
+        counts = [int(x) for x in raw.split(",")]
+        radius = float(r)
+    except (TypeError, ValueError):
+        return None
+    if len(counts) != len(CATEGORIES) or min(counts) < 0 or sum(counts) < 30 or not 1 <= radius <= 10:
+        return None
+    return {"radius_km": radius, "counts": dict(zip(CATEGORIES, counts))}
+
+
+def region_query(params: dict) -> dict:
+    try:
+        lat, lng = float(params["lat"]), float(params["lng"])
+        radius = min(max(float(params.get("radius", 1.5)), 0.5), 3.0)
+    except (KeyError, TypeError, ValueError):
+        return _json(400, {"error": "lat and lng are required numbers."})
+    r = region_radius(radius)
+    return _json(200, {"query": build_count_query(lat, lng, r), "radius_km": r,
+                       "mirrors": MIRRORS})
 
 
 def _num(v, default=None):
@@ -153,6 +187,8 @@ def lambda_handler(event, context=None):
             return _html()
         if path == "/api/health":
             return _json(200, {"ok": True})
+        if path == "/api/region-query" and method == "GET":
+            return region_query(event.get("queryStringParameters") or {})
         if path == "/api/scan" and method == "GET":
             return scan(event.get("queryStringParameters") or {})
         if path == "/api/ideas" and method == "POST":
