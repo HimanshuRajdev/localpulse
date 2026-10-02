@@ -2,7 +2,7 @@
 
 Pick any neighborhood and LocalPulse tells you which kinds of local businesses are missing there, how strong the case is, and what someone could realistically open to fill the gap.
 
-**Live app:** LIVE_URL_HERE
+**Live app:** https://solu375zu4mfkt4yowl4ej62ma0zjwej.lambda-url.us-east-1.on.aws/
 
 ## What it does
 
