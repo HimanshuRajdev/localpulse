@@ -1,0 +1,61 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  LocalPulse. One Lambda function behind a Function URL serves the web page
+  and the API, so the whole app lives at a single link and never sleeps.
+
+Parameters:
+  OpenAIApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: OpenAI key for the business-ideas step (optional; scans work without it)
+  OpenAIModel:
+    Type: String
+    Default: gpt-4o-mini
+  GeoapifyApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Free Geoapify key for fast place lookups (optional; falls back to Overpass)
+
+Resources:
+  AppLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-app
+      RetentionInDays: 14
+
+  App:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-app
+      PackageType: Image
+      Architectures: [x86_64]
+      MemorySize: 1024
+      Timeout: 60
+      LoggingConfig:
+        LogGroup: !Ref AppLogs
+      Environment:
+        Variables:
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_MODEL: !Ref OpenAIModel
+          GEOAPIFY_API_KEY: !Ref GeoapifyApiKey
+      FunctionUrlConfig:
+        AuthType: NONE
+        InvokeMode: BUFFERED
+      Events:
+        KeepWarm:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: rate(5 minutes)
+            Input: '{"warmup": true}'
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./backend
+      DockerTag: v2
+
+Outputs:
+  AppUrl:
+    Description: The one link to share
+    Value: !GetAtt AppUrl.FunctionUrl

@@ -10,7 +10,7 @@ Snowflake upload.
 Run once. Takes ~10 minutes on a typical laptop.
 
 Usage:
-    python -m src.ingestion.filter_yelp
+    python scripts/filter_yelp.py
 """
 
 import json

@@ -1,0 +1,58 @@
+name: Test and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r backend/requirements.txt pytest
+      - run: pytest -q
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: sam build
+      - name: sam deploy
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEOAPIFY_API_KEY: ${{ secrets.GEOAPIFY_API_KEY }}
+        run: |
+          # only pass keys that are actually set; both are optional
+          ARGS=()
+          if [ -n "$OPENAI_API_KEY" ]; then ARGS+=("OpenAIApiKey=$OPENAI_API_KEY"); fi
+          if [ -n "$GEOAPIFY_API_KEY" ]; then ARGS+=("GeoapifyApiKey=$GEOAPIFY_API_KEY"); fi
+          if [ ${#ARGS[@]} -gt 0 ]; then ARGS=(--parameter-overrides "${ARGS[@]}"); fi
+          sam deploy \
+            --stack-name localpulse \
+            --resolve-s3 --resolve-image-repos \
+            --capabilities CAPABILITY_IAM \
+            --no-confirm-changeset --no-fail-on-empty-changeset \
+            "${ARGS[@]}"
+      - name: Print the app link
+        run: |
+          URL=$(aws cloudformation describe-stacks --stack-name localpulse \
+            --query "Stacks[0].Outputs[?OutputKey=='AppUrl'].OutputValue" --output text)
+          echo "LocalPulse is live at $URL" | tee -a "$GITHUB_STEP_SUMMARY"
+          curl -fsS "${URL}api/health"

@@ -1,0 +1,283 @@
+{
+ "pet_services": {
+  "yelp_businesses": 3658,
+  "median_stars": 4.0,
+  "avg_review_log": 2.7444,
+  "reviews": 49130,
+  "avg_sentiment": 0.5001,
+  "negative_ratio": 0.2209,
+  "complaint_themes": [
+   "blood work",
+   "scheduled appointment",
+   "awful staff",
+   "past years",
+   "saturday morning",
+   "couldn tell"
+  ]
+ },
+ "childcare": {
+  "yelp_businesses": 446,
+  "median_stars": 4.0,
+  "avg_review_log": 2.3023,
+  "reviews": 4338,
+  "avg_sentiment": 0.3751,
+  "negative_ratio": 0.2688,
+  "complaint_themes": [
+   "special needs",
+   "staff members",
+   "play area",
+   "birthday party",
+   "school school",
+   "school year"
+  ]
+ },
+ "medical": {
+  "yelp_businesses": 8429,
+  "median_stars": 3.5,
+  "avg_review_log": 2.5215,
+  "reviews": 98495,
+  "avg_sentiment": 0.1973,
+  "negative_ratio": 0.3712,
+  "complaint_themes": [
+   "waiting room",
+   "insurance company",
+   "root canal",
+   "office staff",
+   "schedule appointment",
+   "scheduled appointment"
+  ]
+ },
+ "gym": {
+  "yelp_businesses": 2736,
+  "median_stars": 4.5,
+  "avg_review_log": 2.6578,
+  "reviews": 34638,
+  "avg_sentiment": 0.4985,
+  "negative_ratio": 0.2001,
+  "complaint_themes": [
+   "cancel membership",
+   "locker room",
+   "member years",
+   "cancelled membership",
+   "trying cancel",
+   "cancelling membership"
+  ]
+ },
+ "beauty": {
+  "yelp_businesses": 10589,
+  "median_stars": 4.0,
+  "avg_review_log": 2.8631,
+  "reviews": 147229,
+  "avg_sentiment": 0.4151,
+  "negative_ratio": 0.2573,
+  "complaint_themes": [
+   "gift card",
+   "nail technician",
+   "gift certificate",
+   "felt rushed",
+   "nasty attitude",
+   "charge extra"
+  ]
+ },
+ "automotive": {
+  "yelp_businesses": 10683,
+  "median_stars": 3.5,
+  "avg_review_log": 2.6882,
+  "reviews": 135191,
+  "avg_sentiment": 0.2681,
+  "negative_ratio": 0.3381,
+  "complaint_themes": [
+   "return calls",
+   "buyer beware",
+   "parking spot",
+   "spent hours",
+   "fine print",
+   "hour hour"
+  ]
+ },
+ "education": {
+  "yelp_businesses": 580,
+  "median_stars": 4.5,
+  "avg_review_log": 2.5623,
+  "reviews": 6607,
+  "avg_sentiment": 0.6234,
+  "negative_ratio": 0.1501,
+  "complaint_themes": [
+   "cooking class",
+   "schedule appointment",
+   "total scam",
+   "trying schedule",
+   "week later",
+   "school year"
+  ]
+ },
+ "coffee": {
+  "yelp_businesses": 14741,
+  "median_stars": 4.0,
+  "avg_review_log": 3.4558,
+  "reviews": 239212,
+  "avg_sentiment": 0.3787,
+  "negative_ratio": 0.2279,
+  "complaint_themes": [
+   "cream cheese",
+   "grilled cheese",
+   "long wait",
+   "chicken sandwich",
+   "french fries",
+   "little flavor"
+  ]
+ },
+ "bar": {
+  "yelp_businesses": 11654,
+  "median_stars": 3.5,
+  "avg_review_log": 3.9196,
+  "reviews": 201409,
+  "avg_sentiment": 0.3477,
+  "negative_ratio": 0.2223,
+  "complaint_themes": [
+   "friday night",
+   "saturday night",
+   "dance floor",
+   "happy hour",
+   "beer selection",
+   "mediocre best"
+  ]
+ },
+ "grocery": {
+  "yelp_businesses": 4691,
+  "median_stars": 4.0,
+  "avg_review_log": 3.0514,
+  "reviews": 67771,
+  "avg_sentiment": 0.4338,
+  "negative_ratio": 0.1882,
+  "complaint_themes": [
+   "self checkout",
+   "ground beef",
+   "farmers market",
+   "long line",
+   "grocery shopping",
+   "prices higher"
+  ]
+ },
+ "food": {
+  "yelp_businesses": 32754,
+  "median_stars": 3.5,
+  "avg_review_log": 3.5133,
+  "reviews": 540259,
+  "avg_sentiment": 0.2652,
+  "negative_ratio": 0.2753,
+  "complaint_themes": [
+   "french fries",
+   "gluten free",
+   "long wait",
+   "chicken sandwich",
+   "minute wait",
+   "management needs"
+  ]
+ },
+ "entertainment": {
+  "yelp_businesses": 1131,
+  "median_stars": 4.5,
+  "avg_review_log": 2.731,
+  "reviews": 14027,
+  "avg_sentiment": 0.6297,
+  "negative_ratio": 0.1147,
+  "complaint_themes": [
+   "wine tasting",
+   "person counter",
+   "birthday party",
+   "charge credit",
+   "extremely poor",
+   "bank account"
+  ]
+ },
+ "laundry": {
+  "yelp_businesses": 83,
+  "median_stars": 3.5,
+  "avg_review_log": 2.5305,
+  "reviews": 976,
+  "avg_sentiment": 0.3463,
+  "negative_ratio": 0.3033,
+  "complaint_themes": [
+   "completely ruined",
+   "ready pick",
+   "high prices",
+   "stopped working",
+   "totally unprofessional",
+   "step foot"
+  ]
+ },
+ "retail": {
+  "yelp_businesses": 16432,
+  "median_stars": 4.0,
+  "avg_review_log": 2.5727,
+  "reviews": 195459,
+  "avg_sentiment": 0.3243,
+  "negative_ratio": 0.2814,
+  "complaint_themes": [
+   "sales person",
+   "buyer beware",
+   "dressing room",
+   "return policy",
+   "delivery date",
+   "trying sell"
+  ]
+ },
+ "_tiers": {
+  "thresholds": {
+   "suburban": 0,
+   "mixed": 10,
+   "urban": 40
+  },
+  "mix": {
+   "suburban": {
+    "pet_services": 0.04864,
+    "childcare": 0.00899,
+    "medical": 0.07934,
+    "gym": 0.02334,
+    "beauty": 0.06845,
+    "automotive": 0.1402,
+    "education": 0.0066,
+    "coffee": 0.10275,
+    "bar": 0.07945,
+    "grocery": 0.04481,
+    "food": 0.27285,
+    "entertainment": 0.00812,
+    "laundry": 0.00083,
+    "retail": 0.11561
+   },
+   "mixed": {
+    "pet_services": 0.03009,
+    "childcare": 0.00259,
+    "medical": 0.07582,
+    "gym": 0.02238,
+    "beauty": 0.09517,
+    "automotive": 0.0977,
+    "education": 0.00397,
+    "coffee": 0.12135,
+    "bar": 0.08136,
+    "grocery": 0.03843,
+    "food": 0.29641,
+    "entertainment": 0.00606,
+    "laundry": 0.00069,
+    "retail": 0.12798
+   },
+   "urban": {
+    "pet_services": 0.02012,
+    "childcare": 0.00185,
+    "medical": 0.05945,
+    "gym": 0.02379,
+    "beauty": 0.0953,
+    "automotive": 0.0472,
+    "education": 0.00496,
+    "coffee": 0.14226,
+    "bar": 0.13258,
+    "grocery": 0.03755,
+    "food": 0.25199,
+    "entertainment": 0.01499,
+    "laundry": 0.00062,
+    "retail": 0.16734
+   }
+  }
+ }
+}

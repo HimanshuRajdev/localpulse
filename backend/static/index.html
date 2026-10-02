@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LocalPulse</title>
+<meta name="description" content="Find which kinds of local businesses a neighborhood is missing. OpenStreetMap data, Yelp benchmarks, clustering and an LLM.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%23D9472B' stroke-width='4'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23D9472B'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #FFFFFF; --panel: #FFFFFF; --soft: #F6F6F4; --ink: #1D1D1B; --body: #3B3B38;
+    --muted: #737370; --line: #E6E5E1; --accent: #D9472B; --accent-ink: #B33A22;
+    --blue: #2B64C8; --amber: #A86A00;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  html, body { height: 100%; }
+  body { font-family: var(--sans); font-size: 14px; line-height: 1.5; color: var(--ink); background: var(--bg);
+         -webkit-font-smoothing: antialiased; }
+  a { color: inherit; }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+
+  .app { display: grid; grid-template-columns: 420px 1fr; height: 100vh; }
+  aside { border-right: 1px solid var(--line); overflow-y: auto; background: var(--panel);
+          display: flex; flex-direction: column; }
+  #map { height: 100vh; background: #EEF0EE; }
+  .leaflet-tile-pane { filter: grayscale(.85) contrast(.95) brightness(1.04); }
+
+  /* top of sidebar */
+  .top { padding: 16px 20px 0; display: flex; justify-content: space-between; align-items: center; }
+  .brand { font-weight: 700; font-size: 16px; letter-spacing: -.01em; text-decoration: none;
+           display: flex; align-items: center; gap: 7px; }
+  .brand svg { flex: none; }
+  .top a.src { font-size: 13px; color: var(--muted); text-decoration: none; }
+  .top a.src:hover { color: var(--ink); text-decoration: underline; }
+
+  form { padding: 14px 20px 16px; border-bottom: 1px solid var(--line); }
+  .field { position: relative; }
+  #q { width: 100%; height: 40px; padding: 0 12px; border: 1px solid #CFCECA; border-radius: 6px;
+       background: #fff; outline: none; font-size: 14px; }
+  #q:focus { border-color: var(--ink); }
+  .row { display: flex; gap: 8px; margin-top: 8px; }
+  select { height: 36px; border: 1px solid #CFCECA; border-radius: 6px; background: #fff; padding: 0 8px; flex: 1; }
+  #go { height: 36px; padding: 0 18px; border: 0; border-radius: 6px; background: var(--accent); color: #fff;
+        font-weight: 600; }
+  #go:hover { background: var(--accent-ink); }
+  #go:disabled { background: #E3E2DE; color: #9A9995; cursor: default; }
+  .hint { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+  .hint button { border: 0; background: none; color: var(--ink); text-decoration: underline;
+                 text-decoration-color: #BDBCB7; text-underline-offset: 2px; padding: 0; font-size: 12.5px; }
+  .hint button:hover { text-decoration-color: var(--ink); }
+
+  .suggest { position: absolute; left: 0; right: 0; top: 44px; background: #fff; border: 1px solid #CFCECA;
+             border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.08); z-index: 1000; display: none; overflow: hidden; }
+  .suggest button { display: block; width: 100%; text-align: left; background: #fff; border: 0;
+                    padding: 8px 12px; font-size: 13.5px; }
+  .suggest button.active, .suggest button:hover { background: var(--soft); }
+  .suggest small { color: var(--muted); margin-left: 4px; }
+
+  .body { padding: 18px 20px 28px; flex: 1; }
+  h2 { font-size: 18px; font-weight: 650; letter-spacing: -.01em; line-height: 1.3; }
+  h3 { font-size: 13px; font-weight: 650; }
+  p { color: var(--body); }
+  .muted { color: var(--muted); }
+  .small { font-size: 12.5px; }
+
+  /* intro */
+  .intro p { margin-bottom: 10px; }
+  .intro ol { margin: 4px 0 14px 18px; color: var(--body); }
+  .intro li { margin-bottom: 6px; }
+
+  /* status */
+  .status { padding: 10px 12px; border-radius: 6px; background: var(--soft); font-size: 13px; margin-bottom: 14px; }
+  .status.err { background: #FDF0EC; color: #8A2D19; }
+  .status button { margin-top: 6px; border: 1px solid #D9B2A8; background: #fff; border-radius: 5px; padding: 3px 10px; font-size: 12.5px; }
+  .dots::after { content: ''; animation: dots 1.2s steps(4) infinite; }
+  @keyframes dots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; } }
+
+  /* results */
+  .summary { margin: 6px 0 16px; }
+  .facts { display: flex; gap: 18px; margin: 10px 0 18px; font-size: 12.5px; color: var(--muted); }
+  .facts b { display: block; color: var(--ink); font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .section-h { display: flex; justify-content: space-between; align-items: baseline; margin: 20px 0 6px;
+               padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  .section-h span { font-size: 12px; color: var(--muted); }
+
+  .gap { border-bottom: 1px solid var(--line); }
+  .gap > button { width: 100%; background: none; border: 0; text-align: left; padding: 10px 0;
+                  display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; }
+  .gap > button:hover .name { text-decoration: underline; text-decoration-color: #BDBCB7; }
+  .gap .name { font-weight: 600; }
+  .gap .flag { color: var(--accent); font-size: 12px; font-weight: 600; margin-left: 6px; }
+  .gap .sc { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+  .gap .line { grid-column: 1 / -1; font-size: 13px; color: var(--body); }
+  .gap.on { }
+  .gap.on .name { color: var(--accent-ink); }
+  .detail { display: none; padding: 0 0 14px; }
+  .gap.on .detail { display: block; }
+  .sig { display: grid; grid-template-columns: 92px 1fr 30px; align-items: center; gap: 8px;
+         font-size: 12.5px; color: var(--muted); margin-top: 5px; }
+  .sig .t { height: 5px; background: #EDECE8; border-radius: 3px; overflow: hidden; }
+  .sig .f { height: 100%; }
+  .sig .v { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .detail dl { margin-top: 10px; font-size: 13px; display: grid; grid-template-columns: 92px 1fr; gap: 4px 8px; }
+  .detail dt { color: var(--muted); font-size: 12.5px; }
+  .more { margin-top: 10px; border: 0; background: none; color: var(--muted); text-decoration: underline;
+          font-size: 13px; padding: 0; }
+
+  #ideas-btn { margin-top: 10px; height: 34px; padding: 0 14px; border: 1px solid var(--ink); background: #fff;
+               border-radius: 6px; font-weight: 600; }
+  #ideas-btn:hover { background: var(--ink); color: #fff; }
+  #ideas-btn:disabled { opacity: .5; cursor: default; background: #fff; color: var(--ink); }
+  .idea { padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .idea .k { font-size: 12px; color: var(--muted); }
+  .idea h3 { font-size: 15px; margin: 2px 0 6px; }
+  .idea p { font-size: 13.5px; margin-bottom: 8px; }
+  .idea h4 { font-size: 12px; font-weight: 600; color: var(--ink); margin-top: 8px; }
+  .idea h4 + p { margin-top: 1px; margin-bottom: 0; }
+  .ruled { padding: 10px 0 4px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--body); }
+  .ruled h4 { font-size: 12px; font-weight: 600; color: var(--ink); margin-bottom: 4px; }
+  .ruled ul { margin-left: 16px; }
+  .ruled li { margin-bottom: 4px; }
+
+  details { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 10px; }
+  summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+  summary:hover { color: var(--ink); }
+  .tbl { overflow-x: auto; margin-top: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 5px 6px; border-bottom: 1px solid #F0EFEC; text-align: right; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 500; }
+  .diag { margin-top: 10px; font-size: 12.5px; color: var(--body); }
+
+  footer { padding: 14px 20px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+  footer a { color: var(--muted); }
+
+  .leaflet-tooltip { font-family: var(--sans); font-size: 12px; }
+  .map-hint { position: absolute; z-index: 500; left: 50%; top: 14px; transform: translateX(-50%);
+              background: rgba(255,255,255,.95); border: 1px solid var(--line); border-radius: 6px;
+              padding: 5px 10px; font-size: 12.5px; color: var(--body); pointer-events: none; }
+  .mapwrap { position: relative; }
+
+  @media (max-width: 860px) {
+    .app { grid-template-columns: 1fr; height: auto; }
+    .mapwrap { order: -1; }
+    #map { height: 42vh; }
+    aside { border-right: 0; overflow: visible; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="top">
+      <a class="brand" href="/">
+        <svg width="18" height="18" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="13" fill="none" stroke="#D9472B" stroke-width="4"/><circle cx="16" cy="16" r="4" fill="#D9472B"/></svg>
+        LocalPulse
+      </a>
+      <a class="src" href="https://github.com/HimanshuRajdev/localpulse" target="_blank" rel="noopener">Source on GitHub</a>
+    </div>
+
+    <form id="form" autocomplete="off">
+      <div class="field">
+        <input id="q" type="text" placeholder="Search an address or neighborhood" aria-label="Location"
+               role="combobox" aria-expanded="false" aria-controls="suggest">
+        <div class="suggest" id="suggest" role="listbox"></div>
+      </div>
+      <div class="row">
+        <select id="radius" aria-label="Radius">
+          <option value="0.5">Within 0.5 km</option>
+          <option value="1">Within 1 km</option>
+          <option value="1.5" selected>Within 1.5 km</option>
+          <option value="2">Within 2 km</option>
+          <option value="3">Within 3 km</option>
+        </select>
+        <button id="go" type="submit" disabled>Scan</button>
+      </div>
+      <div class="hint">Or click anywhere on the map. Examples:
+        <button type="button" data-lat="43.0747" data-lng="-89.3841" data-name="Capitol Square, Madison, WI">Madison</button>,
+        <button type="button" data-lat="30.2672" data-lng="-97.7431" data-name="Downtown Austin, TX">Austin</button>,
+        <button type="button" data-lat="40.6782" data-lng="-73.9442" data-name="Crown Heights, Brooklyn, NY">Brooklyn</button>,
+        <button type="button" data-lat="47.6615" data-lng="-122.3132" data-name="University District, Seattle, WA">Seattle</button>
+      </div>
+    </form>
+
+    <div class="body">
+      <div id="status"></div>
+
+      <div id="intro" class="intro">
+        <h2 style="margin-bottom:8px">Which businesses is a neighborhood missing?</h2>
+        <p>Pick a spot and LocalPulse looks at every business around it. Then it checks which kinds
+          are rarer here than in the surrounding area.</p>
+        <ol>
+          <li>Businesses come live from OpenStreetMap and get sorted into 14 categories.</li>
+          <li>Each category's share is compared with its share in the surrounding 4 to 6 km
+            (a location quotient), so a downtown is judged against its own city.</li>
+          <li>Census population shows how many people each business serves, and 1.8M Yelp reviews
+            show what customers complain about in each category.</li>
+          <li>An LLM rules out gaps with obvious explanations, then suggests three businesses for the rest.</li>
+        </ol>
+        <p class="muted small">Coverage depends on how well OpenStreetMap is mapped locally, so treat the
+          scores as a starting point.</p>
+      </div>
+
+      <div id="results" hidden>
+        <h2 id="r-place"></h2>
+        <div class="muted small" id="r-meta"></div>
+        <div class="facts" id="r-facts"></div>
+        <p class="summary" id="r-summary"></p>
+
+        <div class="section-h"><h3>Categories by opportunity</h3><span>score out of 100</span></div>
+        <div id="r-gaps"></div>
+
+        <div class="section-h"><h3>Business ideas</h3><span id="ideas-model"></span></div>
+        <div id="ideas"><p class="small muted">Generated from the top gaps. The model is told to drop
+          anything where the real reason for the gap is that it wouldn't make money.</p></div>
+        <button id="ideas-btn" type="button">Suggest 3 ideas</button>
+
+        <details>
+          <summary>Method details and all scores</summary>
+          <div class="diag" id="r-diag"></div>
+          <div class="tbl"><table id="r-table"></table></div>
+        </details>
+      </div>
+    </div>
+
+    <footer>
+      Data from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
+      and the <a href="https://www.yelp.com/dataset" target="_blank" rel="noopener">Yelp Open Dataset</a>.
+      Built by <a href="https://www.linkedin.com/in/himanshu-rajdev-786043271/" target="_blank" rel="noopener">Himanshu Rajdev</a>.
+    </footer>
+  </aside>
+
+  <div class="mapwrap">
+    <div id="map" role="application" aria-label="Map. Click to scan a location."></div>
+    <div class="map-hint" id="map-hint">Click the map to scan that spot</div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const n100 = (v) => Math.round(v * 100);
+  let place = null, scan = null, busy = false;
+
+  // ── map ────────────────────────────────────────────────────────────────
+  const hasMap = typeof L !== 'undefined';
+  let map, dots, ring, pin;
+  if (hasMap) {
+    map = L.map('map', { zoomControl: true }).setView([39.5, -96.5], 4);
+    // OpenStreetMap's own tiles: free, no key (CARTO now requires one)
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors', maxZoom: 19
+    }).addTo(map);
+    dots = L.layerGroup().addTo(map);
+    map.on('click', async (e) => {
+      if (busy) return;
+      const { lat, lng } = e.latlng;
+      place = { name: `${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng };
+      $('q').value = place.name; $('go').disabled = false;
+      const named = reverseName(lat, lng);
+      runScan(place, +$('radius').value, named);
+    });
+  } else {
+    $('map').innerHTML = '<p style="padding:20px" class="muted">The map could not load.</p>';
+    $('map-hint').hidden = true;
+  }
+
+  async function reverseName(lat, lng) {
+    try {
+      const r = await fetch(`https://photon.komoot.io/reverse?lat=${lat}&lon=${lng}&lang=en`);
+      const p = (await r.json()).features[0]?.properties || {};
+      return [p.district || p.name || p.street, p.city, p.state].filter(Boolean)
+        .filter((v, i, a) => a.indexOf(v) === i).join(', ') || null;
+    } catch { return null; }
+  }
+
+  // ── search (Photon, a free OpenStreetMap geocoder) ───────────────────────
+  const q = $('q'), sug = $('suggest'), go = $('go');
+  let timer, items = [], active = -1, ctrl;
+  function draw() {
+    sug.innerHTML = items.map((it, i) => `<button type="button" role="option" data-i="${i}"
+      class="${i === active ? 'active' : ''}">${esc(it.title)}<small>${esc(it.sub)}</small></button>`).join('');
+    sug.style.display = items.length ? 'block' : 'none';
+    q.setAttribute('aria-expanded', items.length ? 'true' : 'false');
+  }
+  function pick(i) {
+    const it = items[i]; if (!it) return;
+    place = { name: it.full, lat: it.lat, lng: it.lng };
+    q.value = it.full; items = []; draw(); go.disabled = false; go.focus();
+  }
+  q.addEventListener('input', () => {
+    place = null; go.disabled = true; clearTimeout(timer);
+    const text = q.value.trim();
+    if (text.length < 3) { items = []; draw(); return; }
+    timer = setTimeout(async () => {
+      try {
+        ctrl?.abort(); ctrl = new AbortController();
+        const r = await fetch(`https://photon.komoot.io/api/?limit=10&lang=en&q=${encodeURIComponent(text)}`, { signal: ctrl.signal });
+        const seen = new Set();
+        items = (await r.json()).features.map(f => {
+          const p = f.properties;
+          const parts = [p.name, p.district, p.city, p.state].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
+          const full = [...parts, p.countrycode === 'US' ? '' : p.country].filter(Boolean).join(', ');
+          return { title: parts[0], sub: parts.slice(1).join(', '), full,
+                   lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0] };
+        }).filter(it => it.title && !seen.has(it.full) && seen.add(it.full)).slice(0, 6);
+        active = -1; draw();
+      } catch (e) { if (e.name !== 'AbortError') { items = []; draw(); } }
+    }, 220);
+  });
+  q.addEventListener('keydown', (e) => {
+    if (!items.length) return;
+    if (e.key === 'ArrowDown') { active = (active + 1) % items.length; draw(); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { active = (active - 1 + items.length) % items.length; draw(); e.preventDefault(); }
+    else if (e.key === 'Enter') { e.preventDefault(); pick(active < 0 ? 0 : active); }
+    else if (e.key === 'Escape') { items = []; draw(); }
+  });
+  sug.addEventListener('mousedown', (e) => { const b = e.target.closest('button'); if (b) { e.preventDefault(); pick(+b.dataset.i); } });
+  q.addEventListener('blur', () => setTimeout(() => { items = []; draw(); }, 150));
+  $('form').addEventListener('submit', (e) => { e.preventDefault(); if (place) runScan(place, +$('radius').value); });
+  document.querySelectorAll('.hint button').forEach(b => b.addEventListener('click', () => {
+    place = { name: b.dataset.name, lat: +b.dataset.lat, lng: +b.dataset.lng };
+    q.value = place.name; go.disabled = false; runScan(place, +$('radius').value);
+  }));
+
+  // ── scan ───────────────────────────────────────────────────────────────
+  function setStatus(html, err) { $('status').innerHTML = html ? `<div class="status${err ? ' err' : ''}">${html}</div>` : ''; }
+
+  async function runScan(p, radius, namePromise) {
+    busy = true; go.disabled = true;
+    $('map-hint').hidden = true;
+    if (hasMap) {
+      ring?.remove(); pin?.remove(); dots.clearLayers();
+      ring = L.circle([p.lat, p.lng], { radius: radius * 1000, color: '#1D1D1B', weight: 1, fill: false, dashArray: '3 4' }).addTo(map);
+      map.fitBounds(ring.getBounds(), { padding: [20, 20] });
+    }
+    setStatus('<span class="dots">Looking up businesses within ' + radius + ' km</span>');
+    if (namePromise) { const nm = await namePromise; if (nm) { p.name = nm; q.value = nm; } }
+    const params = new URLSearchParams({ lat: (+p.lat).toFixed(5), lng: (+p.lng).toFixed(5), radius, name: p.name });
+    history.replaceState(null, '', '?' + params);
+    try {
+      const r = await fetch('/api/scan?' + params);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'The scan failed.');
+      if (d.warning) throw new Error(d.warning);
+      setStatus(''); scan = d; show(d);
+    } catch (e) {
+      setStatus(`${esc(e.message)}<br><button type="button" id="retry">Try again</button>`, true);
+      $('retry').onclick = () => runScan(p, radius);
+    } finally { busy = false; go.disabled = !place; }
+  }
+
+  function show(d) {
+    $('intro').hidden = true; $('results').hidden = false;
+    $('r-place').textContent = d.place;
+    const when = new Date(d.scanned_at * 1000).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+    $('r-meta').textContent = `${d.radius_km} km around this point · compared with ${d.model.benchmark} · ${when}`;
+    const gaps = d.gaps.filter(g => g.is_gap);
+    const res = d.residents ? Math.round(d.residents.estimate).toLocaleString() : '?';
+    $('r-facts').innerHTML = `<div><b>${d.business_count.toLocaleString()}</b>businesses</div>
+      <div><b>${res}</b>residents</div>
+      <div><b>${gaps.length}</b>likely gaps</div>
+      <div><b>${((d.model.fetch_ms + d.model.runtime_ms) / 1000).toFixed(1)}s</b>to scan</div>`;
+    const names = gaps.slice(0, 3).map(g => g.label.toLowerCase());
+    $('r-summary').textContent = names.length
+      ? `The clearest gaps here are ${names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names.at(-1) : names[0]}. Click a category to see its businesses on the map.`
+      : `Nothing stands out as clearly missing. Supply here is close to what similar areas have.`;
+    renderGaps(d.gaps, 8);
+    drawDots(d);
+    renderMethod(d);
+    $('ideas').innerHTML = `<p class="small muted">Generated from the top gaps. The model is told to drop
+      anything where the real reason for the gap is that it wouldn't make money.</p>`;
+    $('ideas-btn').hidden = false; $('ideas-btn').disabled = false; $('ideas-btn').textContent = 'Suggest 3 ideas';
+    document.querySelector('aside').scrollTop = 0;
+  }
+
+  function sig(label, v, color) {
+    return `<div class="sig"><span>${label}</span><div class="t"><div class="f" style="width:${n100(v)}%;background:${color}"></div></div><span class="v">${n100(v)}</span></div>`;
+  }
+  function renderGaps(gaps, limit) {
+    $('r-gaps').innerHTML = gaps.slice(0, limit).map(g => `
+      <div class="gap" data-cat="${g.category}">
+        <button type="button" aria-expanded="false">
+          <span class="name">${esc(g.label)}${g.is_gap ? '<span class="flag">gap</span>' : ''}</span>
+          <span class="sc">${n100(g.score)}</span>
+          <span class="line">${esc(g.summary)}</span>
+        </button>
+        <div class="detail">
+          ${sig('Short supply', g.supply_gap, 'var(--accent)')}
+          ${sig('Demand', g.demand_proxy, 'var(--blue)')}
+          <dl>
+            <dt>Here / expected</dt><dd>${g.count} / ${Math.round(g.expected)}${g.location_quotient != null ? ` (location quotient ${g.location_quotient})` : ''}</dd>
+            ${g.residents_per_business ? `<dt>Per resident</dt><dd>1 per ${g.residents_per_business.toLocaleString()} residents</dd>` : ''}
+            ${g.nearest.length ? `<dt>Closest</dt><dd>${g.nearest.map(x => `${esc(x.name)} (${x.km} km)`).join(', ')}</dd>` : ''}
+            ${g.hours_gap ? `<dt>Hours</dt><dd>${esc(g.hours_gap)}</dd>` : ''}
+            ${g.complaint_themes.length ? `<dt>Yelp complaints</dt><dd>${g.complaint_themes.map(esc).join(', ')}</dd>` : ''}
+          </dl>
+        </div>
+      </div>`).join('') + (gaps.length > limit ? `<button class="more" id="more" type="button">Show all ${gaps.length} categories</button>` : '');
+    if ($('more')) $('more').onclick = () => renderGaps(gaps, gaps.length);
+    document.querySelectorAll('.gap > button').forEach(b => b.addEventListener('click', () => {
+      const el = b.parentElement, on = !el.classList.contains('on');
+      document.querySelectorAll('.gap').forEach(x => { x.classList.remove('on'); x.firstElementChild.setAttribute('aria-expanded', 'false'); });
+      if (on) { el.classList.add('on'); b.setAttribute('aria-expanded', 'true'); }
+      highlight(on ? el.dataset.cat : null);
+    }));
+  }
+
+  function drawDots(d) {
+    if (!hasMap) return;
+    dots.clearLayers();
+    d.businesses.forEach(b => {
+      L.circleMarker([b.lat, b.lng], { radius: 3.5, weight: 0, fillColor: '#5E5E5A', fillOpacity: .55, cat: b.category })
+        .bindTooltip(`${esc(b.name)}<br><span style="color:#737370">${esc(b.category.replace('_', ' '))}</span>`)
+        .addTo(dots);
+    });
+    pin = L.circleMarker(d.center, { radius: 5, color: '#fff', weight: 2, fillColor: '#D9472B', fillOpacity: 1 }).addTo(map);
+  }
+  function highlight(cat) {
+    if (!hasMap) return;
+    dots.eachLayer(l => {
+      const on = l.options.cat === cat;
+      l.setStyle(cat ? { fillColor: on ? '#D9472B' : '#5E5E5A', fillOpacity: on ? .95 : .2, radius: on ? 5.5 : 3 }
+                     : { fillColor: '#5E5E5A', fillOpacity: .55, radius: 3.5 });
+      if (on) l.bringToFront();
+    });
+  }
+
+  function renderMethod(d) {
+    const m = d.model;
+    $('r-diag').innerHTML = `Source: ${d.source === 'geoapify' ? 'Geoapify (OpenStreetMap data)' : 'OpenStreetMap Overpass API'}.
+      HDBSCAN found ${m.clusters ?? '-'} segments (${m.noise_ratio != null ? n100(m.noise_ratio) : '-'}% noise${m.silhouette != null ? ', silhouette ' + m.silhouette : ''}).
+      Benchmark: ${esc(d.model.benchmark)}.${d.residents ? ` Residents estimated from ${d.residents.tracts} census tract(s), 2020 Census.` : ''}
+      Score = 0.65 short supply + 0.35 demand.`;
+    const cols = [['label', 'Category'], ['score', 'Score'], ['supply_gap', 'Supply'], ['demand_proxy', 'Demand'],
+                  ['count', 'Here'], ['expected', 'Expected'], ['location_quotient', 'LQ']];
+    const fmt = (k, v) => v == null ? '-' : ['score', 'supply_gap', 'demand_proxy'].includes(k) ? n100(v)
+                        : k === 'expected' ? Math.round(v) : esc(v);
+    $('r-table').innerHTML = `<thead><tr>${cols.map(c => `<th>${c[1]}</th>`).join('')}</tr></thead><tbody>` +
+      d.gaps.map(g => `<tr>${cols.map(c => `<td>${fmt(c[0], g[c[0]])}</td>`).join('')}</tr>`).join('') + '</tbody>';
+  }
+
+  // ── ideas ──────────────────────────────────────────────────────────────
+  $('ideas-btn').addEventListener('click', async () => {
+    if (!scan) return;
+    const btn = $('ideas-btn'); btn.disabled = true; btn.textContent = 'Thinking';
+    $('ideas').innerHTML = '<p class="small muted"><span class="dots">Reading the gaps, this takes about 10 seconds</span></p>';
+    try {
+      const r = await fetch('/api/ideas', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ place: scan.place, gaps: scan.gaps, context: {
+          radius_km: scan.radius_km, density_tier: scan.model.density_tier, benchmark: scan.model.benchmark,
+          business_count: scan.business_count, residents_per_km2: scan.residents?.per_km2 ?? null,
+          residents_estimate: scan.residents?.estimate ?? null } }) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Could not generate ideas.');
+      const ruled = (j.ruled_out || []).length ? `<div class="ruled"><h4>Gaps ruled out first</h4><ul>${j.ruled_out.map(r =>
+        `<li><b>${esc(r.category)}</b>. ${esc(r.reason)}</li>`).join('')}</ul></div>` : '';
+      $('ideas').innerHTML = ruled + j.ideas.map((i, n) => `
+        <div class="idea">
+          <div class="k">${n + 1}. ${esc(i.format)}${i.gaps_addressed?.length ? ' · ' + esc(i.gaps_addressed.join(', ')) : ''}</div>
+          <h3>${esc(i.title)}</h3>
+          <p>${esc(i.description)}</p>
+          <h4>Who it's for</h4><p>${esc(i.customer)}</p>
+          <h4>Where</h4><p>${esc(i.where)}</p>
+          <h4>Price and math</h4><p>${esc(i.price_and_math)}</p>
+          <h4>Why current options fall short</h4><p>${esc(i.why_existing_options_fall_short)}</p>
+          <h4>Risks</h4><p>${esc(i.honest_risks)}</p>
+          <h4>First step</h4><p>${esc(i.first_step)}</p>
+        </div>`).join('');
+      $('ideas-model').textContent = j.model || '';
+      btn.textContent = 'Suggest different ideas';
+    } catch (e) {
+      $('ideas').innerHTML = `<div class="status err">${esc(e.message)}</div>`;
+      btn.textContent = 'Try again';
+    } finally { btn.disabled = false; }
+  });
+
+  // ── shared links ───────────────────────────────────────────────────────
+  const sp = new URLSearchParams(location.search);
+  if (sp.get('lat') && sp.get('lng')) {
+    place = { name: sp.get('name') || `${sp.get('lat')}, ${sp.get('lng')}`, lat: +sp.get('lat'), lng: +sp.get('lng') };
+    const r = String(Math.min(Math.max(+sp.get('radius') || 1.5, 0.5), 3));
+    if ([...$('radius').options].some(o => o.value === r)) $('radius').value = r;
+    q.value = place.name; go.disabled = false;
+    runScan(place, +$('radius').value);
+  }
+})();
+</script>
+</body>
+</html>

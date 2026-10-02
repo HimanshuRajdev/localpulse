@@ -22,3 +22,9 @@ Thumbs.db
 *.pkl
 *.joblib
 config.js
+# build + local tooling
+.aws-sam/
+.claude/
+.pytest_cache/
+
+Claude outputs/
