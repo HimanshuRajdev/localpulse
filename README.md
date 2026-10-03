@@ -57,7 +57,7 @@ Hosting is one AWS Lambda function (container image, 1 GB memory) with a Functio
 
 ```bash
 pip install -r backend/requirements.txt pytest
-pytest                                   # 8 tests, no network needed
+pytest                                   # 10 tests, no network needed
 python scripts/dev_server.py             # http://localhost:8000 with live data
 python scripts/dev_server.py --offline   # canned Madison data, no keys needed
 ```

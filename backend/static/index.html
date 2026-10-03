@@ -245,6 +245,7 @@
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const n100 = (v) => Math.round(v * 100);
+  const money = (v) => '$' + Math.round(+v || 0).toLocaleString();
   let place = null, scan = null, busy = false;
 
   // ── map ────────────────────────────────────────────────────────────────
@@ -492,17 +493,19 @@
         `<li><b>${esc(r.category)}</b>. ${esc(r.reason)}</li>`).join('')}</ul></div>` : '';
       $('ideas').innerHTML = ruled + j.ideas.map((i, n) => `
         <div class="idea">
-          <div class="k">${n + 1}. ${esc(i.format)}${i.gaps_addressed?.length ? ' · ' + esc(i.gaps_addressed.join(', ')) : ''}</div>
+          <div class="k">${n + 1}. ${esc(i.format)} · ${esc(i.category)}</div>
           <h3>${esc(i.title)}</h3>
           <p>${esc(i.description)}</p>
           <h4>Who it's for</h4><p>${esc(i.customer)}</p>
           <h4>Where</h4><p>${esc(i.where)}</p>
-          <h4>Price and math</h4><p>${esc(i.price_and_math)}</p>
+          <h4>The numbers</h4><p>${money(i.price_usd)} ${esc(i.unit)} × about ${(i.units_per_month || 0).toLocaleString()} a month
+            = ${money(i.monthly_revenue_usd)} a month in revenue.${i.monthly_rent_usd ? ` Expected rent around ${money(i.monthly_rent_usd)} a month${i.rent_share != null ? ` (${Math.round(i.rent_share * 100)}% of revenue)` : ''}.` : ''}</p>
           <h4>Why current options fall short</h4><p>${esc(i.why_existing_options_fall_short)}</p>
           <h4>Risks</h4><p>${esc(i.honest_risks)}</p>
           <h4>First step</h4><p>${esc(i.first_step)}</p>
         </div>`).join('');
       $('ideas-model').textContent = j.model || '';
+      if (!j.ideas.length) $('ideas').innerHTML = ruled + '<p class="small muted">Every candidate gap was ruled out. Try a different spot or a bigger radius.</p>';
       btn.textContent = 'Suggest different ideas';
     } catch (e) {
       $('ideas').innerHTML = `<div class="status err">${esc(e.message)}</div>`;

@@ -38,11 +38,12 @@ if "--offline" in sys.argv:
     handler.fetch_businesses = lambda lat, lng, r: (parse(elements()), "offline-fixture")
     handler.region_counts = lambda lat, lng, r: REGION
     handler.census_residents = lambda lat, lng, r: RESIDENTS
-    handler.generate_ideas = lambda gaps, ctx: {"model": "offline", "ruled_out": [
+    handler.generate_ideas = lambda gaps, ctx: {"model": "offline", "kept": [], "ruled_out": [
         {"category": gaps[0]["label"], "reason": "Offline placeholder reason."}], "ideas": [{
         "title": f"Example idea {i} for {ctx['place']}", "format": "storefront",
-        "gaps_addressed": [gaps[0]["label"]], "customer": "Placeholder.", "where": "Placeholder.",
-        "description": "Offline placeholder.", "price_and_math": "Placeholder.",
+        "category": gaps[1]["label"], "customer": "Placeholder.", "where": "Placeholder.",
+        "description": "Offline placeholder.", "price_usd": 15, "unit": "per class",
+        "units_per_month": 320, "monthly_revenue_usd": 4800, "monthly_rent_usd": 2400, "rent_share": 0.5,
         "why_existing_options_fall_short": "Placeholder.", "honest_risks": "Placeholder.",
         "first_step": "Placeholder."} for i in (1, 2, 3)]}
 

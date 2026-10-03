@@ -121,3 +121,25 @@ def test_region_from_browser(monkeypatch):
     assert "Yelp" in json.loads(res["body"])["model"]["benchmark"] and not called
     q = json.loads(handler.lambda_handler(_event("/api/region-query", query={"lat": "43", "lng": "-89"}))["body"])
     assert q["query"].count("out count;") == 14 and q["mirrors"]
+
+
+def test_ideas_never_use_a_ruled_out_category(monkeypatch):
+    import localpulse.ideas as I
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    idea = lambda cat: {"title": "t", "format": "kiosk", "category": cat, "customer": "c", "where": "w",
+                        "description": "d", "price_usd": 15, "unit": "per class", "units_per_month": 320,
+                        "monthly_rent_usd": 2400, "why_existing_options_fall_short": "x",
+                        "honest_risks": "r", "first_step": "f"}
+    first = {"assessments": [{"category": "Fitness", "verdict": "rule_out", "reason": "rent"},
+                             {"category": "Laundry", "verdict": "keep", "reason": "ok"}],
+             "ideas": [idea("Fitness"), idea("Laundry")]}
+    second = {**first, "ideas": [idea("Laundry"), idea("Restaurants")]}
+    calls = []
+    monkeypatch.setattr(I, "_call", lambda msgs, *a: calls.append(msgs) or (first if len(calls) == 1 else second))
+    gaps = [{"label": "Fitness"}, {"label": "Laundry"}, {"label": "Restaurants"}]
+    monkeypatch.setattr(I, "build_prompt", lambda g, c: "prompt")
+    out = I.generate_ideas(gaps, {})
+    assert len(calls) == 2 and "ruled out Fitness" in calls[1][-1]["content"]
+    assert [i["category"] for i in out["ideas"]] == ["Laundry", "Restaurants"]
+    assert out["ideas"][0]["monthly_revenue_usd"] == 4800 and out["ideas"][0]["rent_share"] == 0.5
+    assert out["ruled_out"] == [{"category": "Fitness", "reason": "rent"}]

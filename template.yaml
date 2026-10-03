@@ -12,7 +12,7 @@ Parameters:
     Description: OpenAI key for the business-ideas step (optional; scans work without it)
   OpenAIModel:
     Type: String
-    Default: gpt-4o-mini
+    Default: gpt-4o
   GeoapifyApiKey:
     Type: String
     NoEcho: true
